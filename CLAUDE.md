@@ -32,6 +32,20 @@ Authored / brought in:
 - `gravi-cli` — umbrella for the `gravi` CLI (auth, instances, config/creds, `query`, `switch`, tokens, paste, watch). Defers burner lifecycle to `gravi-burners`. Body points to `gravi <cmd> --help` for exact flags.
 - `gravi-burners` — `gravi burner` lifecycle (start / autosync / recreate / restart / logs / pods / …). Brought in from the global `~/.claude/skills/gravi-burners` copy and **refreshed** for CLI drift: dropped the removed `extend` command, added `restart`. ⚠️ The global copy at `~/.claude/skills/gravi-burners` is now stale (still documents `extend`) — decide whether to refresh/consolidate it.
 
+## Plugins (Claude Code, project-scoped)
+
+Claude Code **plugins** (bundles of skills + agents + commands + hooks + MCP) are a separate system
+from the `skills` CLI. We manage frigate's plugins at **project scope** so they live in this repo
+(`.claude/settings.json`) rather than user scope — they travel with the workspace.
+
+- Declare a marketplace in the repo: `claude plugin marketplace add <owner/repo> --scope project`
+- Enable a plugin in the repo:       `claude plugin install <plugin>@<marketplace> --scope project`
+- Remove from user scope:            `claude plugin uninstall <plugin>@<marketplace> --scope user`
+- Project scope writes `.claude/settings.json` (`extraKnownMarketplaces` + `enabledPlugins`). **Commit it.** Changes apply on the **next session restart**.
+
+### Plugins enabled here
+- `superpowers@superpowers-marketplace` (`obra/superpowers-marketplace`), v6.1.0 — moved user→project scope. Source of the `superpowers:*` skills (brainstorming, writing-skills, TDD, systematic-debugging, …).
+
 ---
 
 _(append notes below as we work)_
