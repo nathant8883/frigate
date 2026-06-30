@@ -46,6 +46,23 @@ from the `skills` CLI. We manage frigate's plugins at **project scope** so they 
 ### Plugins enabled here
 - `superpowers@superpowers-marketplace` (`obra/superpowers-marketplace`), v6.1.0 — moved user→project scope. Source of the `superpowers:*` skills (brainstorming, writing-skills, TDD, systematic-debugging, …).
 
+## Skill naming & skill-vs-context
+
+**Prefix project-specific skills by product** (the thing whose workflow varies): AIO = `snd-`.
+So AIO SDLC skills are `snd-kickoff`, `snd-jira-housekeeping`, `snd-testing`, etc. A future project
+gets its own prefix (crossroads → `xr-`/`cr-`). Cross-project skills stay **unprefixed**:
+`brainstorming`, `subagent-driven-development`, `gravi-burners`, `gravi-cli`, `herdr`, `skill-creator`.
+
+**Skill vs context:** only specialized, reusable, triggerable knowledge becomes a *skill*
+(`gravi-burners`, `backend-i18n`, `snd-jira-housekeeping`). Mechanical/deterministic steps with no
+hidden knowledge — squash+push, "draft PR not full", the branch model, the pipeline sequence — live
+as **context** in the operating manual, not as skills.
+
+### Existing AIO-specific skills to retrofit to `snd-` later (NOTED, not yet done)
+- `fixbugs` → `snd-fixbugs` (bug-subtask fix flow)
+- `backend-i18n` → `snd-backend-i18n`
+We'll work these in as we go — captured here so we don't forget.
+
 ---
 
 _(append notes below as we work)_
