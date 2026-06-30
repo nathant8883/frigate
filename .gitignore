@@ -1,0 +1,9 @@
+# Managed project repos live under projects/ — each is its own git repo
+# (or a symlink to one). The frigate orchestrator repo never tracks them.
+projects/
+
+# Common cruft
+__pycache__/
+*.py[cod]
+.venv/
+.DS_Store
