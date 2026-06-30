@@ -48,20 +48,36 @@ surface any gaps as a heads-up so they get resolved during dev; **don't block ki
 The gate that actually enforces these before a PR lives in `snd-jira-housekeeping`
 (see `frigate/docs/snd-aio-sdlc.md`).
 
-## 3. Create the worktree + branch
+## 3. Create the worktree + provision it
 
 Branch convention: **`KB-XXX_descriptor`** — the ticket key plus a 1–2 word description drawn from
 the summary (e.g. `KB-4821_route-export`). Confirm the descriptor with the captain if it's ambiguous.
 
-Base off **`RC`** (the active integration branch in the `RC → beta → sharedprod` model). Create an
-isolated worktree with herdr:
+Base off **`RC`**. Create the worktree **in the project's herdr workspace** so it shows up as a tab
+there (the mate keeps one workspace per project — `herdr workspace list` to find the id):
 
 ```bash
-herdr worktree create --branch KB-XXX_descriptor --base RC
+# preferred — attach to the project workspace
+herdr worktree create --workspace <project-workspace-id> --branch KB-XXX_descriptor --base RC
+# or by repo path if that workspace isn't open yet
+herdr worktree create --cwd <repo> --branch KB-XXX_descriptor --base RC
 ```
 
+**Provision crew skills into the worktree.** The crewmate runs with `cwd = <worktree>`, a fresh
+checkout — so it can't see frigate's skills, and untracked files in the main checkout don't propagate
+into a worktree. Symlink the project's local crew skills in so the crewmate can trigger them:
+
+```bash
+mkdir -p <worktree>/.claude
+ln -sfn <repo>/.claude/skills <worktree>/.claude/skills
+```
+
+(One-time per project: `/.claude/` is added to the repo's `.git/info/exclude` — shared across all
+worktrees via the common git dir — so the local crew skills and this symlink never show in
+`git status` or get pushed. Full model: `frigate/docs/snd-aio-sdlc.md` → **Orchestration**.)
+
 If you're not running under herdr, fall back to a sibling git worktree (never branch inside the
-primary checkout):
+primary checkout), then provision it the same way:
 
 ```bash
 git -C <repo> worktree add ../.worktrees/KB-XXX_descriptor -b KB-XXX_descriptor RC

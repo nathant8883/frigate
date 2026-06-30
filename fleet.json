@@ -1,0 +1,10 @@
+{
+  "_note": "Mate's source of truth for the fleet board. Update at every dispatch-loop transition. Stages: Kickoff, Build, Housekeeping, Testing, PR, Ready-for-Testing, Done. Crew status is overlaid live from herdr by bin/fleet (joined on worktree path). Seeded 2026-06-30 with the 4 kept worktrees — reconcile stage/jira on next mate run.",
+  "in_flight": [
+    {"ticket": "KB-44985", "summary": "Site attributes", "project": "snd_aio", "stage": "Build", "branch": "KB-44985_site_attrs", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/kb-44985-site-attrs", "jira": "?", "updated": "2026-06-30", "blocked": ""},
+    {"ticket": "KB-45857", "summary": "Out-of-route miles", "project": "snd_aio", "stage": "Build", "branch": "epic/out-of-route-miles", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/kb-45857", "jira": "?", "updated": "2026-06-30", "blocked": ""},
+    {"ticket": "—", "summary": "Directives", "project": "snd_aio", "stage": "Build", "branch": "directives", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/directives", "jira": "—", "updated": "2026-06-30", "blocked": ""},
+    {"ticket": "—", "summary": "Sentry triage", "project": "snd_aio", "stage": "Build", "branch": "sentry", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/sentry", "jira": "—", "updated": "2026-06-30", "blocked": ""}
+  ],
+  "done": []
+}

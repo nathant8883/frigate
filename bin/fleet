@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+"""frigate fleet board — in-flight work, with live crew status overlaid from herdr.
+
+Usage:
+  bin/fleet            render the board to stdout (joins live `herdr agent list`)
+  bin/fleet --write    also snapshot the board to FLEET.md
+Env:
+  FLEET_NO_HERDR=1     skip the herdr query (static board from the ledger only)
+
+fleet.json is the mate's source of truth. The Crew column is overlaid live from herdr at
+render time, joined on worktree path (cwd) — durable across herdr restarts (pane ids are not).
+Run it on a refresh loop for a live dashboard:  watch -n 5 /home/nturner/frigate/bin/fleet
+"""
+import json, os, subprocess, sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+LEDGER = os.path.join(ROOT, "fleet.json")
+SNAPSHOT = os.path.join(ROOT, "FLEET.md")
+
+CREW = {
+    "working": "🟢 working",
+    "blocked": "🔴 blocked",
+    "idle":    "🟡 idle",
+    "done":    "⚪ done",
+    "unknown": "❔ unknown",
+}
+NO_AGENT = "➖ —"
+HERDR_DOWN = "✗ herdr"
+
+
+def trunc(s, n):
+    s = str(s)
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def live_status_by_cwd():
+    """worktree path -> (crew label, pane_id). None if herdr is unavailable/skipped."""
+    if os.environ.get("FLEET_NO_HERDR"):
+        return None
+    try:
+        out = subprocess.run(["herdr", "agent", "list"], capture_output=True, text=True, timeout=8)
+        agents = json.loads(out.stdout).get("result", {}).get("agents", [])
+    except Exception:
+        return None
+    m = {}
+    for a in agents:
+        cwd = (a.get("foreground_cwd") or a.get("cwd") or "").rstrip("/")
+        if cwd:
+            m[cwd] = (CREW.get(a.get("agent_status", "unknown"), CREW["unknown"]), a.get("pane_id", ""))
+    return m
+
+
+def load_ledger():
+    try:
+        with open(LEDGER) as f:
+            return json.load(f)
+    except Exception:
+        return {"in_flight": [], "done": []}
+
+
+def render():
+    led = load_ledger()
+    live = live_status_by_cwd()
+    cols = [("ticket", "Ticket"), ("summary", "Summary"), ("project", "Project"),
+            ("stage", "Stage"), ("crew", "Crew"), ("loc", "Branch · pane"),
+            ("jira", "Jira"), ("updated", "Upd")]
+    rows = []
+    for it in led.get("in_flight", []):
+        wt = (it.get("worktree") or "").rstrip("/")
+        if live is None:
+            crew, pane = HERDR_DOWN, it.get("pane", "")
+        elif wt in live:
+            crew, pane = live[wt]
+        else:
+            crew, pane = NO_AGENT, ""
+        loc = it.get("branch", "") + (f" · {pane}" if pane else "")
+        rows.append({
+            "ticket": it.get("ticket", "—"), "summary": trunc(it.get("summary", ""), 24),
+            "project": it.get("project", ""), "stage": it.get("stage", ""), "crew": crew,
+            "loc": trunc(loc, 34), "jira": it.get("jira", "—"), "updated": it.get("updated", ""),
+        })
+    widths = {k: max([len(h)] + [len(str(r[k])) for r in rows]) for k, h in cols}
+
+    def row_line(vals):
+        return "| " + " | ".join(str(v).ljust(widths[k]) for (k, _), v in zip(cols, vals)) + " |"
+
+    stamp = "static (herdr skipped/down)" if live is None else "live"
+    out = [f"# Fleet — in-flight work   ·   crew = {stamp}", "",
+           row_line([h for _, h in cols]),
+           "|" + "|".join("-" * (widths[k] + 2) for k, _ in cols) + "|"]
+    for r in rows:
+        out.append(row_line([r[k] for k, _ in cols]))
+    if not rows:
+        out.append("_(nothing in flight)_")
+
+    blocked = [it for it in led.get("in_flight", []) if it.get("blocked")]
+    if blocked:
+        out += ["", "## Blocked — needs captain"]
+        out += [f'- **{b.get("ticket", "—")}** ({b.get("branch","")}) — {b["blocked"]}' for b in blocked]
+
+    done = led.get("done", [])
+    if done:
+        out += ["", "## Recently done"]
+        out += [f'- {d.get("ticket", "—")} — {d.get("note", "")}' for d in done]
+    return "\n".join(out) + "\n"
+
+
+if __name__ == "__main__":
+    txt = render()
+    sys.stdout.write(txt)
+    if "--write" in sys.argv:
+        with open(SNAPSHOT, "w") as f:
+            f.write(txt)

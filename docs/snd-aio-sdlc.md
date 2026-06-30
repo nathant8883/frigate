@@ -17,7 +17,9 @@ Promotion flows `RC → beta → sharedprod`. **Feature work branches off `RC`.*
 One KB ticket flows through these stages. `→` marks the skill/tool that owns the stage.
 
 1. **Kick off** → `snd-kickoff`
-   Jira readiness heads-up → herdr worktree on `KB-XXX_descriptor` (off `RC`) → ticket to **In Progress**.
+   Jira readiness heads-up → herdr worktree on `KB-XXX_descriptor` (off `RC`, in the project's
+   workspace) → provision crew skills into the worktree → ticket to **In Progress**. (See
+   **Orchestration** below.)
 
 2. **Spec + build**
    - Non-trivial work: `brainstorming` (spec + implementation plan) → `subagent-driven-development` (execute).
@@ -48,6 +50,63 @@ One KB ticket flows through these stages. `→` marks the skill/tool that owns t
 
 7. **Ready for Testing** → `snd-jira-housekeeping`
    Once dev + E2E are done and it's ready for third-party manual validation, move the story to **Ready for Testing**.
+
+## Orchestration — herdr workspaces & skill placement
+
+frigate drives the SDLC through **herdr** (running daemon, session `default`). The hierarchy:
+
+```
+session (herdr daemon)
+└── workspace        one per project   — herdr workspace create --cwd projects/<repo> --label <repo>
+    └── tab          one per worktree  — herdr worktree create --workspace <id> --branch KB-XXX_descriptor --base RC
+        └── pane → agent  the crewmate — herdr agent start claude --workspace <id> --cwd <worktree> -- claude
+```
+
+- The **mate** (orchestrator) runs at `cwd = frigate`. It keeps one workspace per active project,
+  opens a worktree-tab per ticket, starts a crewmate agent in each, and watches them with
+  `herdr agent list` / `herdr wait agent-status <pane> --status done`.
+- A **crewmate** runs at `cwd = <worktree>` — a separate git checkout (herdr puts worktrees outside
+  the repo). That cwd is the constraint everything below hinges on.
+
+### Mate skills vs crew skills
+
+Skills resolve from the **running agent's cwd** (`<cwd>/.claude/skills` + `~/.claude/skills`). Because
+the crewmate's cwd is the worktree, **frigate's `.claude/skills` are invisible to it.** So skills split
+by who runs them:
+
+- **Mate skills** — run at `cwd=frigate`: `snd-kickoff`, `snd-jira-housekeeping` (intake + PR/Jira
+  ceremony that bracket the work). **Home: `frigate/.claude/skills/`.**
+- **Crew skills** — run in the worktree: `brainstorming`, `subagent-driven-development`,
+  `(snd-)fixbugs`, `(snd-)backend-i18n`, code-review/simplify, `gravi-burners`. **Home: the project
+  repo, local scope (below).**
+
+### Crew-skill placement: project-repo-local, provisioned, graduation-ready
+
+Crew skills live in the **project repo** at `<project>/.claude/skills/`, kept **local** (never pushed,
+team unaffected) via the repo's `.git/info/exclude` (entry `/.claude/`). `info/exclude` lives in the
+shared common git dir, so one entry covers every worktree.
+
+Caveat git forces: a worktree is a fresh checkout, so **untracked files don't propagate into it.** The
+mate therefore **provisions** at kickoff — after `worktree create`, symlink the worktree's skills to
+the project's:
+
+```bash
+mkdir -p <worktree>/.claude
+ln -sfn <repo>/.claude/skills <worktree>/.claude/skills
+```
+
+**Graduation:** when the team should get them, delete the `/.claude/` line from `.git/info/exclude`,
+`git add .claude/skills`, and commit to `RC`. They become shared and worktrees inherit them on
+checkout — drop the provisioning symlink. Zero rewrite.
+
+**superpowers rider:** `brainstorming` + `subagent-driven-development` come from the superpowers
+*plugin*, not loose skills. So crewmates get them, enable superpowers at **user scope**
+(`claude plugin install superpowers@superpowers-marketplace --scope user`) — a public plugin, nothing
+secret. frigate's project-scope enable stays for the mate.
+
+> Per-project scaffolding (the `info/exclude` entry + the first crew skills) lands when a project is
+> brought in / first kicked off. `snd_aio` is now moved in at
+> `frigate/projects/supply_and_dispatch_aio` (2026-06-30) — the scaffolding is the next step, not yet applied.
 
 ## Jira rules
 
@@ -104,4 +163,4 @@ Existing AIO-specific skills to retrofit to `snd-` later (noted, not yet done): 
 
 ## Where this lives
 
-A frigate reference doc for now (the orchestrator points crewmates at it; `snd_aio` is still a placeholder symlink). Once `snd_aio` is properly moved in, the project-intrinsic parts can be promoted into its own `AGENTS.md` (firstmate-style), keeping fleet/orchestration concerns in frigate.
+A frigate reference doc for now (the orchestrator points crewmates at it). `snd_aio` now lives at `frigate/projects/supply_and_dispatch_aio` (moved in 2026-06-30). The project-intrinsic parts can later be promoted into its own `AGENTS.md` (firstmate-style), keeping fleet/orchestration concerns in frigate.
