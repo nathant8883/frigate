@@ -21,13 +21,14 @@ One KB ticket flows through these stages. `→` marks the skill/tool that owns t
    workspace) → provision crew skills into the worktree → ticket to **In Progress**. (See
    **Orchestration** below.)
 
-2. **Spec + build**
+2. **Spec + build** — the mate dispatches a crewmate via `snd-brief` (self-contained brief + FLEET
+   STATUS report-back protocol); the crew, in the worktree, does:
    - Non-trivial work: `brainstorming` (spec + implementation plan) → `subagent-driven-development` (execute).
    - Small bug/issue: skip brainstorming; go straight to `subagent-driven-development`.
    - Wrap new user-facing strings with `tr()` → `backend-i18n`.
    - Fixing bug subtasks on an existing story branch → `fixbugs`.
 
-3. **Housekeeping** — code review, simplification, best-practice check. **[§4.1 TBD — define the stack/order]**
+3. **Housekeeping** → `housekeeping` (snd_aio skill): simplify → code-review → BE/FE best-practice compliance table (Pass/Fail/N/A) → auto-fix fails.
 
 4. **Squash + push** *(mechanical — context, no skill)*
    - Squash the feature work into a tight set of commits so the initial dev reviews in one pass.
@@ -45,7 +46,7 @@ One KB ticket flows through these stages. `→` marks the skill/tool that owns t
 6. **Draft PR** *(mechanical + rule — context, no skill)*
    - **First, the pre-PR Jira gate** → `snd-jira-housekeeping`: ≥2 Dev/Validate subtasks, in the current sprint, energy-point estimate. If a gap is unresolved, **stop — don't open the PR.**
    - Document **AC drift → Dev Implementation** section + post the **test-coverage comment** (gherkin + unit tests) → `snd-jira-housekeeping`.
-   - Open a **draft** PR only: `gh pr create --draft`. **Never a full/ready PR without the captain's approval** (full PRs create review noise for the team). Follow the PR template. **[TBD: template location/sections]**
+   - Open a **draft** PR only: `gh pr create --draft --base RC --body "<filled template>"`. **Never a full/ready PR without the captain's approval** (full PRs create review noise for the team). Use snd_aio's own convention: the template at `.github/pull_request_template.md` (What / Why / Test plan / Files / Ticket) and the repo `CLAUDE.md` § Pull Requests — fill the body (never blank), pass `--body` not `--fill`, terse/factual tone (cf. #960/#958/#957). A crewmate in the worktree already has both in context (it auto-loads snd_aio's `CLAUDE.md`); the mate, at frigate, reads them from the repo when it opens the PR.
    - Set the story to **Ready for Review** → `snd-jira-housekeeping`.
 
 7. **Ready for Testing** → `snd-jira-housekeeping`
@@ -83,21 +84,26 @@ by who runs them:
 ### Crew-skill placement: project-repo-local, provisioned, graduation-ready
 
 Crew skills live in the **project repo** at `<project>/.claude/skills/`, kept **local** (never pushed,
-team unaffected) via the repo's `.git/info/exclude` (entry `/.claude/`). `info/exclude` lives in the
-shared common git dir, so one entry covers every worktree.
+team unaffected) via the repo's `.git/info/exclude` entry `**/.claude/skills/` — it ignores *untracked*
+skill dirs, so already-tracked team skills (e.g. `backend_testing`, the frontend's `grids`/`i18n`) are
+unaffected (gitignore never untracks committed files). `info/exclude` lives in the shared common git
+dir, so the one entry covers every worktree.
 
 Caveat git forces: a worktree is a fresh checkout, so **untracked files don't propagate into it.** The
-mate therefore **provisions** at kickoff — after `worktree create`, symlink the worktree's skills to
-the project's:
+mate therefore **provisions** at kickoff — after `worktree create`, symlink each **local-only** skill
+into the worktree (skip tracked skills — they're already in the checkout, and symlinking the whole dir
+would clobber them):
 
 ```bash
-mkdir -p <worktree>/.claude
-ln -sfn <repo>/.claude/skills <worktree>/.claude/skills
+mkdir -p <worktree>/.claude/skills
+for d in <repo>/.claude/skills/*/; do name=$(basename "$d")
+  git -C <repo> ls-files --error-unmatch ".claude/skills/$name" >/dev/null 2>&1 && continue
+  ln -sfn "$d" "<worktree>/.claude/skills/$name"; done
 ```
 
-**Graduation:** when the team should get them, delete the `/.claude/` line from `.git/info/exclude`,
-`git add .claude/skills`, and commit to `RC`. They become shared and worktrees inherit them on
-checkout — drop the provisioning symlink. Zero rewrite.
+**Graduation:** to share one skill, `git add -f .claude/skills/<name>` (force past the local ignore) and
+commit to `RC` — it becomes shared and worktrees inherit it on checkout; drop that skill's symlink.
+Don't delete the `**/.claude/skills/` exclude line itself — that would expose *every* local skill.
 
 **superpowers rider:** `brainstorming` + `subagent-driven-development` come from the superpowers
 *plugin*, not loose skills. So crewmates get them, enable superpowers at **user scope**
@@ -123,12 +129,13 @@ secret. frigate's project-scope enable stays for the mate.
 | Stage | Skill / tool | Status |
 |---|---|---|
 | 1 Kick off (Jira intake + worktree/branch + In Progress) | `snd-kickoff` | ✅ built |
+| 2 Dispatch (brief + supervise crew) | `snd-brief` (mate↔crew FLEET STATUS protocol) | ✅ built |
 | 2a Spec / plan | `brainstorming` | have |
 | 2b Execute | `subagent-driven-development` | have |
-| 3 Housekeeping | `/code-review`, `/simplify`, `requesting-code-review` | have-ish, **§4.1 TBD** |
+| 3 Housekeeping | `housekeeping` (snd_aio): simplify → review → BE/FE compliance table + autofix | ✅ built |
 | 4 Squash + push + CI | **context** (git + `gh run watch`) | ✅ in this doc |
 | 5 Unit / E2E testing | `uv run pytest`, `snd_tests`, `gravi-burners` | partial, **TBD** |
-| 6 Draft PR | **context** (`gh pr create --draft` + template) | ✅ in this doc; template **TBD** |
+| 6 Draft PR | **context** (`gh pr create --draft --base RC` + repo template) | ✅ resolved — snd_aio's `.github/pull_request_template.md` + `CLAUDE.md` § Pull Requests |
 | Jira hygiene (gate, statuses, AC-drift, coverage) | `snd-jira-housekeeping` | ✅ built |
 | Bug fixes on a story | `fixbugs` (→ `snd-fixbugs`) | have |
 | i18n strings | `backend-i18n` (→ `snd-backend-i18n`) | have |
@@ -148,17 +155,15 @@ Existing AIO-specific skills to retrofit to `snd-` later (noted, not yet done): 
 
 ## Open definitions (nail down as we build)
 
-1. **§4.1 housekeeping stack** — exact review / simplify / best-practice tools + order.
-2. **Testing** specifics — the hourglass details; how `snd_tests` E2E suites run against a burner.
-3. **PR template** — location + required sections.
-4. **Jira** — current-sprint detection + energy-point estimation (manual vs assisted). (Transition/field names are resolved at runtime via `getTransitionsForJiraIssue`.)
+1. **Testing** specifics — the hourglass details; how `snd_tests` E2E suites run against a burner. (The repo's `backend_testing` skill already covers unit-test best practices.)
+2. **Jira** — current-sprint detection + energy-point estimation (manual vs assisted). (Transition/field names are resolved at runtime via `getTransitionsForJiraIssue`.)
 
-*Resolved:* feature-branch base = `RC`; worktree mechanism = herdr `worktree create`.
+*Resolved:* feature-branch base = `RC`; worktree mechanism = herdr `worktree create`; **PR template** = snd_aio's own `.github/pull_request_template.md` + `CLAUDE.md` § Pull Requests; **§4.1 housekeeping** = the `housekeeping` skill in snd_aio (simplify → code-review → BE/FE compliance table + auto-fix).
 
 ## Status
 
-- ✅ **Built:** `snd-kickoff`, `snd-jira-housekeeping`; this operating manual (sequence + squash+push + draft-PR as context).
-- ▶ **Next:** define **§4.1 housekeeping**, then **testing** specifics + PR template.
+- ✅ **Built:** `snd-kickoff`, `snd-brief`, `snd-jira-housekeeping` (mate-tier); `housekeeping` (snd_aio, stage 3); this operating manual + the mate layer (dispatch loop, fleet board).
+- ▶ **Next:** **testing** specifics + **Jira** sprint/points detection. (§4.1 housekeeping ✅ and PR template ✅ resolved.)
 - ⏭ **Later:** the **orchestration layer** — the first mate dispatching a crewmate per ticket and supervising it through this playbook (herdr-driven).
 
 ## Where this lives

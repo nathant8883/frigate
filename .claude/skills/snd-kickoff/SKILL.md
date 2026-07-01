@@ -63,18 +63,24 @@ herdr worktree create --workspace <project-workspace-id> --branch KB-XXX_descrip
 herdr worktree create --cwd <repo> --branch KB-XXX_descriptor --base RC
 ```
 
-**Provision crew skills into the worktree.** The crewmate runs with `cwd = <worktree>`, a fresh
-checkout — so it can't see frigate's skills, and untracked files in the main checkout don't propagate
-into a worktree. Symlink the project's local crew skills in so the crewmate can trigger them:
+**Provision local skills into the worktree.** The crewmate runs with `cwd = <worktree>`, a fresh
+checkout — so untracked/local skills in the main checkout don't propagate into it. Symlink the repo's
+**local-only** skills in, skipping tracked team skills (e.g. `backend_testing`) that are already in the
+checkout — never symlink the whole `.claude/skills` dir or you'll clobber the tracked ones:
 
 ```bash
-mkdir -p <worktree>/.claude
-ln -sfn <repo>/.claude/skills <worktree>/.claude/skills
+mkdir -p <worktree>/.claude/skills
+for d in <repo>/.claude/skills/*/; do
+  name=$(basename "$d")
+  git -C <repo> ls-files --error-unmatch ".claude/skills/$name" >/dev/null 2>&1 && continue  # skip tracked
+  ln -sfn "$d" "<worktree>/.claude/skills/$name"
+done
 ```
 
-(One-time per project: `/.claude/` is added to the repo's `.git/info/exclude` — shared across all
-worktrees via the common git dir — so the local crew skills and this symlink never show in
-`git status` or get pushed. Full model: `frigate/docs/snd-aio-sdlc.md` → **Orchestration**.)
+(One-time per project: `**/.claude/skills/` is in the repo's `.git/info/exclude` — local, shared across
+worktrees via the common git dir — so our local skills and these symlinks never show in `git status` or
+get committed. Share one later with `git add -f .claude/skills/<name>`. Full model:
+`frigate/docs/snd-aio-sdlc.md` → **Orchestration**.)
 
 If you're not running under herdr, fall back to a sibling git worktree (never branch inside the
 primary checkout), then provision it the same way:
@@ -87,14 +93,15 @@ git -C <repo> worktree add ../.worktrees/KB-XXX_descriptor -b KB-XXX_descriptor 
 
 Transition the story to **In Progress** (`getTransitionsForJiraIssue` → `transitionJiraIssue`).
 
-## 5. Hand off to development
+## 5. Hand off to development → `snd-brief`
 
-- **Non-trivial work:** spec + implementation plan via the `brainstorming` skill, then execute via
-  `subagent-driven-development`.
-- **Small bug/issue:** skip brainstorming; go straight to `subagent-driven-development`.
+Kickoff prepared the worktree; now **dispatch a crewmate** to do the actual work — don't code it
+yourself. Use **`snd-brief`** to compose a self-contained brief and supervise the crew via the FLEET
+STATUS protocol. The crew (in the worktree) does the spec/build (`brainstorming` →
+`subagent-driven-development`), `housekeeping`, and tests; the mate owns the back-half ceremony.
 
-Report to the captain: the branch name, the worktree path, and the new Jira status — development
-starts from there.
+Report to the captain: the branch name, the worktree path, and the new Jira status — then `snd-brief`
+takes it from there.
 
 ---
 

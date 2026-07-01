@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# frigate "mate" launcher (non-destructive).
+#
+# Ensures a single "mate" workspace exists in the running herdr session (rooted at
+# frigate, running claude), focuses it, and brings up the herdr UI if you're not
+# already inside it. The workspace is appended to the session — reorder it to the
+# top in herdr yourself. Idempotent: re-running focuses the existing mate (restarting
+# claude if its pane is empty, e.g. after a herdr restart) rather than duplicating it.
+#
+#   inside herdr  -> ensure + focus the mate workspace
+#   outside herdr -> ensure it (starting the server if needed), then attach the TUI
+
+set -uo pipefail
+DIR=/home/nturner/frigate
+SOCK=/home/nturner/.config/herdr/herdr.sock
+
+server_up() { lsof "$SOCK" >/dev/null 2>&1; }
+
+find_mate_ws() {
+  herdr workspace list 2>/dev/null | python3 -c '
+import sys, json
+target = sys.argv[1]
+try: wss = json.load(sys.stdin)["result"]["workspaces"]
+except Exception: sys.exit(0)
+for w in wss:
+    wt = w.get("worktree") or {}
+    if w.get("label") == "mate" or wt.get("repo_root") == target:
+        print(w["workspace_id"]); break
+' "$DIR"
+}
+
+ws_has_agent() {
+  herdr agent list 2>/dev/null | python3 -c '
+import sys, json
+ws = sys.argv[1]
+try: ags = json.load(sys.stdin)["result"]["agents"]
+except Exception: sys.exit(1)
+sys.exit(0 if any(a.get("workspace_id") == ws for a in ags) else 1)
+' "$1"
+}
+
+pane_of_ws() {
+  herdr pane list 2>/dev/null | python3 -c '
+import sys, json
+ws = sys.argv[1]
+try: panes = json.load(sys.stdin)["result"]["panes"]
+except Exception: sys.exit(0)
+for p in panes:
+    if p.get("workspace_id") == ws:
+        print(p.get("pane_id", "")); break
+' "$1"
+}
+
+ensure_mate() {
+  local claude_cmd="claude"
+  [ "$#" -gt 0 ] && claude_cmd="claude $*"
+  local ws rp out
+  ws=$(find_mate_ws)
+  if [ -z "$ws" ]; then
+    out=$(herdr workspace create --cwd "$DIR" --label mate --no-focus 2>/dev/null)
+    ws=$(echo "$out" | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["workspace"]["workspace_id"])' 2>/dev/null)
+    rp=$(echo "$out" | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["root_pane"]["pane_id"])' 2>/dev/null)
+    [ -n "$rp" ] && herdr pane run "$rp" "$claude_cmd" >/dev/null 2>&1
+    echo "mate: created workspace ${ws:-?}, started '$claude_cmd'"
+  elif ! ws_has_agent "$ws"; then
+    rp=$(pane_of_ws "$ws")
+    if [ -n "$rp" ]; then
+      herdr pane run "$rp" "$claude_cmd" >/dev/null 2>&1
+      echo "mate: workspace $ws exists, (re)started '$claude_cmd'"
+    else
+      echo "mate: workspace $ws exists but couldn't find its pane — start claude in it manually"
+    fi
+  else
+    echo "mate: workspace $ws already running — focusing"
+  fi
+  [ -n "$ws" ] && herdr workspace focus "$ws" >/dev/null 2>&1
+}
+
+# --- main ---
+if [ -n "${HERDR_ENV:-}" ]; then
+  ensure_mate "$@"          # already inside the UI
+else
+  if ! server_up; then
+    echo "mate: starting herdr server…"
+    nohup herdr server >/dev/null 2>&1 &
+    for _ in $(seq 1 50); do server_up && break; sleep 0.1; done
+  fi
+  if ! server_up; then
+    echo "mate: herdr server unreachable — launching plain claude at $DIR"
+    cd "$DIR" && exec claude "$@"
+  fi
+  ensure_mate "$@"
+  echo "mate: attaching herdr UI (mate workspace focused — reorder it to the top if you like)"
+  exec herdr
+fi

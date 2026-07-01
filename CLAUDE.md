@@ -31,17 +31,19 @@ project's playbook first** — the stages, branch model, and Jira rules below ar
 
 1. **Kick off** → run **`snd-kickoff`**: worktree + branch off `RC` in the project's herdr workspace,
    provision crew skills into the worktree, Jira → In Progress. **Add a board row** (stage `Kickoff`→`Build`).
-2. **Spawn a crewmate** into the worktree pane and give it its orders:
-   ```bash
-   herdr agent start KB-XXXX --workspace <project-ws-id> --cwd <worktree> -- claude
-   herdr agent send <pane> "Work KB-XXXX in this worktree. Follow docs/snd-aio-sdlc.md: brainstorm if non-trivial, build, housekeep, test on a burner. Report when done or blocked."
-   ```
-3. **Supervise** — `herdr wait agent-status <pane> --status done` (watch for `blocked`). Run several
-   crewmates concurrently across workspaces. **Update the board** on every transition; on `blocked`,
-   fill the board's Blocked section and tell the captain — don't let it sit.
+2. **Brief + spawn the crewmate** → **`snd-brief`**: compose a **self-contained** brief (the crewmate
+   can't see frigate's docs — inline the task, how-to, and definition-of-done) and `herdr agent send` it
+   into the worktree pane. **Board** → stage `Build`, crew 🟢.
+3. **Supervise + converse** (via `snd-brief`) — block on `herdr wait agent-status <pane> --status done`
+   (also wakes on `blocked`/idle), `herdr agent read` the crew's **FLEET STATUS** block, and respond:
+   answer a `needs-decision`/`blocked` with a one-line `herdr agent send` (or surface to the captain +
+   board **Blocked**), collect the `done` handoff. Short steers down, status blocks up. Run several
+   crewmates concurrently; **update the board** on every transition.
 4. **On done** — `herdr agent read <pane> --source recent` to review, then **own the ceremony**:
-   squash+push (watch CI), the pre-PR **`snd-jira-housekeeping`** gate, draft PR, status transitions.
-   **Update the board** (`Testing`→`PR`→`Ready-for-Testing`).
+   squash+push (watch CI), the pre-PR **`snd-jira-housekeeping`** gate, **draft PR** (`gh pr create
+   --draft --base RC`, body filled from the project's own `.github/pull_request_template.md` per its
+   `CLAUDE.md` § Pull Requests — the crewmate already has these in context from the worktree), status
+   transitions. **Update the board** (`Testing`→`PR`→`Ready-for-Testing`).
 5. **Report** to the captain; move the row to **Recently done** when complete.
 
 ## The fleet board
@@ -84,11 +86,12 @@ Skills resolve from the running agent's cwd. The mate runs at `cwd=frigate`; cre
 
 - **Mate skills** (`snd-kickoff`, `snd-jira-housekeeping`) → live in `frigate/.claude/skills/`.
 - **Crew skills** (brainstorming, subagent-driven-development, fixbugs, backend-i18n,
-  code-review/simplify, gravi-burners) → **project repo, local scope** (`<project>/.claude/skills/`,
-  ignored via the repo's `.git/info/exclude` `/.claude/`). The mate **provisions** them into each
-  worktree at kickoff via symlink (worktrees don't inherit untracked files). **Graduate** to
-  team-shared by dropping the exclude line + committing to RC. superpowers (brainstorming/SDD) is a
-  plugin → enable at **user scope** so crewmates get it.
+  code-review/simplify, gravi-burners, `housekeeping`) → **project repo, local scope**
+  (`<project>/.claude/skills/`, ignored via the repo's `.git/info/exclude` entry `**/.claude/skills/`,
+  which ignores *untracked* skills so tracked team skills stay). The mate **provisions** each
+  local-only skill into each worktree at kickoff via symlink (skip tracked skills). **Graduate** one
+  with `git add -f .claude/skills/<name>` + commit to RC, then drop its symlink. superpowers
+  (brainstorming/SDD) is a plugin → enable at **user scope** so crewmates get it.
 
 Full rationale: `docs/snd-aio-sdlc.md` → **Orchestration**.
 
