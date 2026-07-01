@@ -28,6 +28,7 @@ CREW = {
 }
 NO_AGENT = "—"
 HERDR_DOWN = "✗ herdr"
+FEEDBACK = "🔴 feedback"   # ledger `blocked` note set → crew is waiting on captain feedback
 
 
 def trunc(s, n):
@@ -89,6 +90,8 @@ def render():
             crew, pane = live[wt]
         else:
             crew, pane = NO_AGENT, ""
+        if it.get("blocked"):          # mate flagged it → needs captain feedback; overrides live status
+            crew = FEEDBACK
         rows.append({
             "ticket": it.get("ticket", "—"), "summary": trunc(it.get("summary", ""), 24),
             "project": it.get("project", ""), "stage": it.get("stage", ""), "crew": crew,
@@ -110,7 +113,7 @@ def render():
 
     blocked = [it for it in led.get("in_flight", []) if it.get("blocked")]
     if blocked:
-        out += ["", "## Blocked — needs captain"]
+        out += ["", "## 🔴 Needs feedback — captain"]
         out += [f'- **{b.get("ticket", "—")}** ({b.get("branch","")}) — {b["blocked"]}' for b in blocked]
 
     done = led.get("done", [])
