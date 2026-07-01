@@ -3,6 +3,7 @@
   "in_flight": [
     {"ticket": "KB-44985", "summary": "Site Attributes", "project": "snd_aio", "stage": "Build", "branch": "KB-44985_site_attrs", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/kb-44985-site-attrs", "jira": "In Progress", "updated": "2026-07-01", "blocked": ""},
     {"ticket": "KB-45857", "summary": "Odometer on RouteDetail", "project": "snd_aio", "stage": "Build", "branch": "epic/out-of-route-miles", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/kb-45857", "jira": "In Progress", "updated": "2026-07-01", "blocked": ""},
+    {"ticket": "KB-47763", "summary": "Cross-market order ERR", "project": "snd_aio", "stage": "Build", "branch": "KB-47763_market-redirect", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/kb-47763-market-redirect", "jira": "In Progress", "updated": "2026-07-01", "blocked": ""},
     {"ticket": "—", "summary": "Sentry triage", "project": "snd_aio", "stage": "Build", "branch": "sentry", "worktree": "/home/nturner/.herdr/worktrees/supply_and_dispatch_aio/sentry", "jira": "—", "updated": "2026-06-30", "blocked": ""}
   ],
   "done": [

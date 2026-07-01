@@ -21,7 +21,9 @@ CREW = {
     "working": "🟢 working",
     "blocked": "🔴 blocked",
     "idle":    "🟡 idle",
-    "done":    "⚪ done",
+    # herdr "done" = agent finished its turn (unread) — NOT work done. Work isn't done
+    # until it's merged through Jira + PR, so a finished crewmate reads as idle here.
+    "done":    "🟡 idle",
     "unknown": "❔ unknown",
 }
 NO_AGENT = "—"
