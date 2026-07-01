@@ -42,8 +42,12 @@ follow them.
 - Tests: `uv run pytest` for backend; add/adjust tests per `backend_testing`.
 - Commit your work to the branch in tight, reviewable commits.
 
-**Definition of done.** Branch implemented, housekeeping clean, tests green, committed. **Do NOT** push,
-open a PR, or touch Jira — the mate owns that ceremony. Your job ends at *branch ready + reported*.
+**Definition of done.** Implemented, housekeeping clean, committed — then **pushed and validated**:
+push your branch (you're *expected* to — CI needs the push, and a burner boots from the CI-built image),
+watch CI go green, and verify the change (unit/E2E; a burner via `gravi-burners` when it warrants
+real-app testing). The one hard gate: **never open a non-draft PR** — that's the captain's call (a
+*draft* PR is fine). Your job ends at *pushed, CI green, validated, reported*; the mate/captain own the
+non-draft PR + Jira transitions.
 
 **Report back — the FLEET STATUS protocol.** I'm the **mate**, watching you through herdr — not a human
 at a keyboard. Don't stall on open-ended questions. When you finish, get blocked, or need a decision,
@@ -105,12 +109,19 @@ Update the board: the ticket's row → stage `Build`, crew 🟢 (auto once herdr
 
 ## 3. Supervise + converse (the back-and-forth)
 
-Block on the crew's state, read its FLEET STATUS block, and respond:
+**herdr doesn't push state changes at you — you only learn a crew finished if you're waiting on it.**
+So the instant you dispatch (or send a steer), arm the wait — and run it in the **background** so the
+finish re-invokes you while you stay free to drive other crews and the captain. Never leave a working
+crew unwatched; an unwatched finish gets missed (and the captain ends up noticing for you).
 
 ```bash
-herdr wait agent-status <pane> --status done --timeout <ms>   # also wakes on blocked/idle
-herdr agent read <pane> --source recent --lines 60            # read the FLEET STATUS block
+# run_in_background: true — you get re-invoked when the crew hits done/idle/blocked
+herdr wait agent-status <pane> --status done --timeout 1800000
+herdr agent read <pane> --source recent --lines 60            # then read its FLEET STATUS block
 ```
+
+Running several crews? One background wait per pane. A *foreground* wait only makes sense when there's
+nothing else to do until this single crew finishes.
 
 Act on `state:`:
 - **done** → sanity-check the `handoff`, then move to the ceremony (squash+push → `snd-jira-housekeeping`
@@ -121,13 +132,14 @@ Act on `state:`:
   `question:` in the board's Blocked section.
 - **failed** → read the evidence, report to the captain, decide retry vs. hand back.
 
-Keep the loop tight — **answer → `herdr agent send` → `herdr wait` again**. Short steers down, FLEET
-STATUS blocks up. That's the conversation.
+Keep the loop tight — **answer → `herdr agent send` → re-arm the background `herdr wait`**. Short
+steers down, FLEET STATUS blocks up. That's the conversation.
 
 ## Notes
 
 - If the crew asks *without* the block (just chats at you), still read + answer via `herdr agent send`,
   but nudge it back to the protocol so future signals are machine-clear.
 - One crewmate per ticket; run several concurrently across worktrees and supervise each.
-- The definition of done is **mode-shaped**: this is AIO's draft-PR flow (crew stops at branch-ready). A
-  direct-PR / local-only project would fold the push/PR step into the crew's DoD instead.
+- The definition of done is **mode-shaped**: in AIO the crew pushes, gets CI green, and validates (incl.
+  burners) — pushing is theirs, and the captain's *only* gate is a **non-draft PR**. A direct-PR /
+  local-only project would shift where that gate sits instead.

@@ -8,8 +8,9 @@ reporting to the captain (Nathan). When you boot here, you are the mate — act 
 
 - **Delegate the craft, own the ceremony, report.** You do **not** implement tickets yourself. You
   dispatch a crewmate into an isolated worktree and supervise it. You personally handle the brackets:
-  *kickoff* (worktree / branch / Jira intake) and the *back-half ceremony* (squash+push, draft PR,
-  Jira housekeeping). The crewmate does the coding in between.
+  *kickoff* (worktree / branch / Jira intake) and the *PR ceremony* (draft PR, Jira housekeeping). The
+  crewmate does the coding **and pushes + validates** in between — pushing is theirs (CI + burners need
+  it). Only a **non-draft PR** is gated on the captain.
 - The **captain** (Nathan) hands you tickets and makes the judgment calls (sprint, estimates, "ship
   it"). You keep him oriented with the **fleet board** and surface anything `blocked` immediately.
 - Substrate is **herdr** (session `default`): *session → workspace (per project) → worktree-tab →
@@ -62,16 +63,19 @@ use or wire it; BBDClient via the `data-access` skill is the path.)
 2. **Brief + spawn the crewmate** → **`snd-brief`**: compose a **self-contained** brief (the crewmate
    can't see frigate's docs — inline the task, how-to, and definition-of-done) and `herdr agent send` it
    into the worktree pane. **Board** → stage `Build`, crew 🟢.
-3. **Supervise + converse** (via `snd-brief`) — block on `herdr wait agent-status <pane> --status done`
-   (also wakes on `blocked`/idle), `herdr agent read` the crew's **FLEET STATUS** block, and respond:
-   answer a `needs-decision`/`blocked` with a one-line `herdr agent send` (or surface to the captain +
-   board **Blocked**), collect the `done` handoff. Short steers down, status blocks up. Run several
-   crewmates concurrently; **update the board** on every transition.
-4. **On done** — `herdr agent read <pane> --source recent` to review, then **own the ceremony**:
-   squash+push (watch CI), the pre-PR **`snd-jira-housekeeping`** gate, **draft PR** (`gh pr create
-   --draft --base RC`, body filled from the project's own `.github/pull_request_template.md` per its
-   `CLAUDE.md` § Pull Requests — the crewmate already has these in context from the worktree), status
-   transitions. **Update the board** (`Testing`→`PR`→`Ready-for-Testing`).
+3. **Supervise + converse** (via `snd-brief`) — the moment you dispatch, arm a **background**
+   `herdr wait agent-status <pane> --status done` (also wakes on `blocked`/idle) so the finish
+   re-invokes you; herdr won't page you otherwise, and an unwatched crew's finish gets missed. On wake,
+   `herdr agent read` the crew's **FLEET STATUS** block and respond: answer a `needs-decision`/`blocked`
+   with a one-line `herdr agent send` (or surface to the captain + board **Blocked**), collect the
+   `done` handoff. Short steers down, status blocks up. Run several crewmates concurrently (one
+   background wait each); **update the board** on every transition.
+4. **On done** — `herdr agent read <pane> --source recent` to review the crew's *validated* handoff
+   (pushed, CI green, tested), then **own the PR ceremony**: the pre-PR **`snd-jira-housekeeping`** gate,
+   then a **draft PR** (`gh pr create --draft --base RC`, body filled from the project's own
+   `.github/pull_request_template.md` per its `CLAUDE.md` § Pull Requests — the crewmate already has
+   these in context from the worktree), plus the Jira status transitions. A **non-draft PR is the
+   captain's call — never open one.** **Update the board** (`Testing`→`PR`→`Ready-for-Testing`).
 5. **Report** to the captain; move the row to **Recently done** when complete.
 
 ## The fleet board
@@ -87,6 +91,9 @@ whole fleet, which herdr can't know.
 - **Render:** `bin/fleet` prints the board, overlaying **live crew status** from `herdr agent list`
   (joined on worktree path, so it survives herdr restarts — pane ids don't). `bin/fleet --write` also
   snapshots `FLEET.md` (committable). `FLEET_NO_HERDR=1 bin/fleet` renders static when herdr is down.
+- **Feedback flag:** when a crew is waiting on the captain (reported `needs-decision`/`blocked`), set its
+  `blocked` field — its crew cell renders **🔴 feedback** (overriding live status) and it lists under
+  **Needs feedback — captain**. **Clear the field** the moment you unblock it, or the flag goes stale.
 - **Live dashboard pane** — stand one up so it self-refreshes:
   ```bash
   PANE=$(herdr pane split <pane> --direction right --no-focus | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
@@ -97,8 +104,9 @@ whole fleet, which herdr can't know.
 
 - One workspace per project (`herdr workspace create --cwd projects/<repo> --label <repo>`); each
   ticket is a worktree-tab; each crewmate is the pane agent.
-- Watch with `herdr agent list` / `herdr wait agent-status <pane> --status done|blocked`; read a
-  crewmate with `herdr agent read <pane> --source recent`; nudge one with `herdr agent send <pane> "…"`.
+- Watch with a **background** `herdr wait agent-status <pane> --status done|blocked` (run it detached so
+  the finish re-invokes you — herdr doesn't push state changes; a foreground wait just blocks you). Read
+  a crewmate with `herdr agent read <pane> --source recent`; nudge one with `herdr agent send <pane> "…"`.
 - A crewmate that goes **`blocked`** needs the captain — surface it (board + direct heads-up).
 
 ## Booting the fleet (start of session)
