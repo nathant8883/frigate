@@ -24,13 +24,27 @@ CREW = {
     "done":    "⚪ done",
     "unknown": "❔ unknown",
 }
-NO_AGENT = "➖ —"
+NO_AGENT = "—"
 HERDR_DOWN = "✗ herdr"
 
 
 def trunc(s, n):
     s = str(s)
     return s if len(s) <= n else s[: n - 1] + "…"
+
+
+# status circles render as two terminal cells but len() counts them as one;
+# dwidth/pad keep columns aligned when a crew emoji is present.
+WIDE = set("🟢🔴🟡⚪❔")
+
+
+def dwidth(s):
+    return sum(2 if ch in WIDE else 1 for ch in str(s))
+
+
+def pad(s, w):
+    s = str(s)
+    return s + " " * max(0, w - dwidth(s))
 
 
 def live_status_by_cwd():
@@ -62,8 +76,8 @@ def render():
     led = load_ledger()
     live = live_status_by_cwd()
     cols = [("ticket", "Ticket"), ("summary", "Summary"), ("project", "Project"),
-            ("stage", "Stage"), ("crew", "Crew"), ("loc", "Branch · pane"),
-            ("jira", "Jira"), ("updated", "Upd")]
+            ("stage", "Stage"), ("crew", "Crew"), ("loc", "Branch"),
+            ("jira", "Jira")]
     rows = []
     for it in led.get("in_flight", []):
         wt = (it.get("worktree") or "").rstrip("/")
@@ -73,16 +87,15 @@ def render():
             crew, pane = live[wt]
         else:
             crew, pane = NO_AGENT, ""
-        loc = it.get("branch", "") + (f" · {pane}" if pane else "")
         rows.append({
             "ticket": it.get("ticket", "—"), "summary": trunc(it.get("summary", ""), 24),
             "project": it.get("project", ""), "stage": it.get("stage", ""), "crew": crew,
-            "loc": trunc(loc, 34), "jira": it.get("jira", "—"), "updated": it.get("updated", ""),
+            "loc": trunc(it.get("branch", ""), 28), "jira": it.get("jira", "—"),
         })
-    widths = {k: max([len(h)] + [len(str(r[k])) for r in rows]) for k, h in cols}
+    widths = {k: max([dwidth(h)] + [dwidth(r[k]) for r in rows]) for k, h in cols}
 
     def row_line(vals):
-        return "| " + " | ".join(str(v).ljust(widths[k]) for (k, _), v in zip(cols, vals)) + " |"
+        return "| " + " | ".join(pad(v, widths[k]) for (k, _), v in zip(cols, vals)) + " |"
 
     stamp = "static (herdr skipped/down)" if live is None else "live"
     out = [f"# Fleet — in-flight work   ·   crew = {stamp}", "",
