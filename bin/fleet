@@ -18,7 +18,7 @@ LEDGER = os.path.join(ROOT, "fleet.json")
 SNAPSHOT = os.path.join(ROOT, "FLEET.md")
 
 CREW = {
-    "working": "🟢 working",
+    "working": "🔄 working",
     "blocked": "🔴 blocked",
     "idle":    "🟡 idle",
     # herdr "done" = agent finished its turn (unread) — NOT work done. Work isn't done
@@ -38,7 +38,7 @@ def trunc(s, n):
 
 # status circles render as two terminal cells but len() counts them as one;
 # dwidth/pad keep columns aligned when a crew emoji is present.
-WIDE = set("🟢🔴🟡⚪❔")
+WIDE = set("🔄🟢🔴🟡⚪❔")
 
 
 def dwidth(s):
