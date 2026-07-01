@@ -21,11 +21,39 @@ reporting to the captain (Nathan). When you boot here, you are the mate — act 
 | Project | Path | Mode | Playbook |
 |---|---|---|---|
 | **snd_aio** (AIO) | `projects/supply_and_dispatch_aio` | draft-PR-only — never a full PR without the captain | `docs/snd-aio-sdlc.md` |
-| bestbuy_tools | `projects/bestbuy_tools` | — (no SDLC playbook yet) | — |
+| bestbuy_tools | `projects/bestbuy_tools` | tooling repo — houses BBDClient / testbed / crossroads code (see Toolbelt) | — |
 | deployment_configs | `projects/deployment_configs` | config / direct | — |
 
 Each project has its own lifecycle; AIO's is the mature one. **When you pick up a ticket, read its
 project's playbook first** — the stages, branch model, and Jira rules below are AIO's.
+
+## Toolbelt — ambient capabilities (any crewmate, wherever it's working)
+
+Two different things the fleet does, don't conflate them:
+- **Workflows** — a unit of work dispatched *to a target* with a deliverable (dev a ticket → PR;
+  triage → report). These get a worktree/workspace + `snd-brief`.
+- **Capabilities / tools** — abilities a crewmate reaches for *mid-task, regardless of which project
+  it's in.* An AIO crewmate debugging its own ticket may need the burner DB; a triage run needs Sentry.
+  These are **not destinations** — they must be reachable from *any* cwd. You don't "go to bestbuy_tools"
+  to query data; data access is a tool the crew already carries.
+
+| Capability | How the crew reaches it (from any cwd) |
+|---|---|
+| **Reach a database** | configured envs (dev/test/prod clients) → **BBDClient** (`bbdclient` skill), invoked from anywhere via `uv run --directory projects/bestbuy_tools python …` → `BBDClient.from_config("<dev>")` / `from_mom("<client>")` → `client.db.<database>.<collection>`. **Burner / instance DBs** → the **`gravi`** CLI (fetches the conn / queries directly, no tunnel). Raw connection string → the mongodb MCP. Creds in `bestbuy_tools/.env`. |
+| **Burners** (spin / sync / logs) | the **`gravi`** CLI (`gravi burner …`) — works from any cwd |
+| **Jira / Sentry / Grafana** | the Atlassian / Sentry / Grafana **MCPs** — ambient to any agent |
+
+DB gotchas (all sources): databases are named `environment_service` (default the `_backend` one, e.g.
+`dev_backend`); orders = `order_v2`; embedded IDs may be `ObjectId` **or** `str` — check the collection
+schema before querying by id.
+
+**How crewmates carry it:** capability skills live in **global scope** (`~/.claude/skills`) so every
+crewmate loads them regardless of cwd — **`data-access`** (the router above), plus **`gravi-cli`** /
+**`gravi-burners`** (symlinked from frigate, so they stay version-controlled here). The authoritative
+`bbdclient` API skill stays team-tracked in bb_tools; `data-access` points at it. This is the
+**opposite** of project skills (which stay local to their repo) — capability skills are cross-cutting,
+so global is correct. (The `bb_tools/mcp/bbd_client_server.py` MCP is a **defunct prototype** — don't
+use or wire it; BBDClient via the `data-access` skill is the path.)
 
 ## The dispatch loop (per ticket)
 
@@ -78,6 +106,12 @@ whole fleet, which herdr can't know.
 When you sit down as the mate: ensure a workspace per active project, reconcile `fleet.json` against
 `herdr agent list` (and Jira via `snd-jira-housekeeping` if stages are stale), and — if it isn't up —
 stand up the live board pane. Then report the board to the captain.
+
+**herdr can lose state across restarts.** Workspaces (and their labels/ids) don't always survive a
+herdr restart, but the **git worktrees do** — so a ticket can show on the board (it joins on worktree
+path) with no workspace behind it. Reconciling means: for every live worktree, confirm a workspace
+exists (recreate on the worktree if not) and re-provision crew skills (kickoff only provisioned what
+existed *then*). `snd-brief` §2 does these checks before every dispatch — that's where the mechanics live.
 
 ## Skill placement (mate vs crew)
 

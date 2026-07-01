@@ -61,16 +61,47 @@ handoff: <only if done — branch, test result, anything the ceremony needs>
 I'll either answer (and you continue) or take it from here.
 ---
 
-## 2. Send it
+## 2. Pre-flight, then send
 
-If `snd-kickoff` didn't already start the agent, spawn it, then deliver the brief into the pane:
+Three checks before you spawn — each one bit us once:
+
+**a. Does the worktree still have a workspace?** herdr can drop a worktree's workspace on restart while
+the git worktree survives (the board keeps showing the row because it joins on **worktree path**, not
+workspace id). If `herdr workspace list` has no workspace whose `worktree.checkout_path` is this
+worktree, recreate one on it — don't spawn into a stale/absent one:
 
 ```bash
-herdr agent start KB-XXXX --workspace <snd_aio-ws> --cwd <worktree> -- claude
-herdr agent send <pane> "<the composed brief>"
+herdr workspace create --cwd <worktree> --label <ticket-descriptor> --no-focus
+# parse result.workspace.workspace_id and result.root_pane.pane_id from the JSON
 ```
 
-Update the board: the ticket's row → stage `Build`, crew 🟢.
+**b. Are the crew skills the brief names actually provisioned?** `snd-kickoff` provisioned them *at
+kickoff time* — but a skill added to the repo since (or a worktree older than the skill) leaves gaps.
+Re-run kickoff's provision loop against the worktree so any new local-only skills get symlinked in, then
+verify: `ls <worktree>/.claude/skills` shows `housekeeping`, `backend_testing`, etc.
+
+**c. Spawn — and ALWAYS pin the workspace.** Without `--workspace`, `herdr agent start` splits the agent
+into whatever pane is **focused** — i.e. the mate's own tab, not the worktree. Cleanest is to run the
+agent as the workspace's root pane (matches the fleet's one-workspace-per-worktree convention):
+
+```bash
+herdr pane run <root_pane> "claude"          # <root_pane> from (a)
+# or into an already-open project workspace:  herdr agent start KB-XXXX --workspace <ws> --cwd <worktree> -- claude
+```
+
+> **Skills load at startup.** If (b) added a skill *after* the agent was already running, it won't see
+> it. Restart the pane: type `/exit` (Ctrl-C only clears the input; herdr rejects `C-d`), then
+> `herdr pane run <pane> "claude"` again.
+
+Now deliver the brief. `herdr agent send` writes literal text but does **not** press Enter — submit
+separately. A multi-line brief is easiest from a file (backticks/newlines survive intact):
+
+```bash
+herdr agent send <pane> "$(cat /tmp/brief-KB-XXXX.md)"
+herdr pane send-keys <pane> Enter
+```
+
+Update the board: the ticket's row → stage `Build`, crew 🟢 (auto once herdr sees the agent working).
 
 ## 3. Supervise + converse (the back-and-forth)
 
