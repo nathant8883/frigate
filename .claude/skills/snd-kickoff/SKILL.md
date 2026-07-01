@@ -35,18 +35,22 @@ sprint`, and the story-point/energy-point field).
 - If it's a **story**, that's the unit of work.
 - If it's a **subtask**, work its parent story (a story carries the branch).
 
-## 2. Note Jira readiness (the gate is at PR, not here)
+## 2. Get the ticket into proper Jira order — at kickoff, not at PR
 
-The story needs all three **before it can be PR'd** — not before work starts. At kickoff, just
-surface any gaps as a heads-up so they get resolved during dev; **don't block kickoff** on them.
-(Never change Jira silently — sprint membership and estimates are the captain's call.)
+Don't just note gaps — **square the story away in Jira before work starts.** Confirm the judgment
+calls with the captain (which sprint, how many points, who owns it), then set them:
 
-- **≥2 subtasks — Dev & Validate**
-- **In the current sprint**
-- **Energy-point estimate**
+- **In the active sprint** — pull it in.
+- **Assigned** to the owning dev.
+- **≥2 subtasks — Dev & Validate.**
+- **Energy-point estimate.**
 
-The gate that actually enforces these before a PR lives in `snd-jira-housekeeping`
-(see `frigate/docs/snd-aio-sdlc.md`).
+**The only exception is exploratory work, and only when the captain explicitly calls it out** — then it
+may start without the full setup. Absent that explicit call-out, treat all four as required at kickoff.
+
+Sprint / estimate / assignment are the captain's calls — **confirm, don't guess or set them silently.**
+These same checks are re-enforced pre-PR by `snd-jira-housekeeping`, whose mechanics (subtask creation,
+sprint + estimate fields) you reuse here (see `frigate/docs/snd-aio-sdlc.md`).
 
 ## 3. Create the worktree + provision it
 
