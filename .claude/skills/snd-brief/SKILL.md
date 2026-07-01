@@ -39,7 +39,11 @@ follow them.
 - Non-trivial? Spec the approach first, then implement. Small bug? Go straight to the fix.
 - Follow the repo conventions (i18n wrapping, the datetime rules, typed FE client, etc. — your `CLAUDE.md`).
 - When the code is done, run the **`housekeeping`** skill (simplify → review → BE/FE compliance → autofix).
-- Tests: `uv run pytest` for backend; add/adjust tests per `backend_testing`.
+- Tests: `uv run pytest` for backend (per `backend_testing`); `yarn test` for FE unit. **For a
+  user-facing change, add/extend an E2E feature** in `automation/snd_e2e` (`features/<area>/*.feature`
+  + steps) — the fix and its E2E land in the *same* PR (see that suite's `CLAUDE.md`). The
+  `/qa-feature`→`/qa-gen`→`/qa-heal` authoring chain is **human-triggered** (LLM cost + live burner), so
+  hand-author the feature/steps if it isn't run, and validate against a burner.
 - Commit your work to the branch in tight, reviewable commits.
 
 **Definition of done.** Implemented, housekeeping clean, committed — then **pushed and validated**:
