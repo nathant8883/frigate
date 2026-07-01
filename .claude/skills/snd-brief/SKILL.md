@@ -32,18 +32,16 @@ Fill this template with the ticket + worktree. Keep it tight — the crew alread
 
 **Where you are.** You're in an isolated worktree for this ticket — branch `KB-XXXX_descriptor` off
 `RC`. Work only here; don't touch other worktrees or the main checkout. Your repo `CLAUDE.md` and skills
-(`housekeeping`, `backend_testing`, and the frontend skills if you touch `frontend/`) are in context —
-follow them.
+(`housekeeping`, `backend_testing`, `snd-testing`, and the frontend skills if you touch `frontend/`) are
+in context — follow them.
 
 **How to work.**
 - Non-trivial? Spec the approach first, then implement. Small bug? Go straight to the fix.
 - Follow the repo conventions (i18n wrapping, the datetime rules, typed FE client, etc. — your `CLAUDE.md`).
 - When the code is done, run the **`housekeeping`** skill (simplify → review → BE/FE compliance → autofix).
-- Tests: `uv run pytest` for backend (per `backend_testing`); `yarn test` for FE unit. **For a
-  user-facing change, add/extend an E2E feature** in `automation/snd_e2e` (`features/<area>/*.feature`
-  + steps) — the fix and its E2E land in the *same* PR (see that suite's `CLAUDE.md`). The
-  `/qa-feature`→`/qa-gen`→`/qa-heal` authoring chain is **human-triggered** (LLM cost + live burner), so
-  hand-author the feature/steps if it isn't run, and validate against a burner.
+- Tests: `uv run pytest` for backend (per `backend_testing`); `yarn test` for FE unit. **Then run
+  `snd-testing`** — it makes the explicit call on whether the change needs an E2E and, if so, authors it
+  via `automation/snd_e2e`'s human-gated `/qa-start` chain (the E2E lands in the same PR).
 - Commit your work to the branch in tight, reviewable commits.
 
 **Definition of done.** Implemented, housekeeping clean, committed — then **pushed and validated**:
