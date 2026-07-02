@@ -58,25 +58,28 @@ use or wire it; BBDClient via the `data-access` skill is the path.)
 
 ## The dispatch loop (per ticket)
 
-1. **Kick off** → run **`snd-kickoff`**: worktree + branch off `RC` in the project's herdr workspace,
-   provision crew skills into the worktree, Jira → In Progress. **Add a board row** (stage `Kickoff`→`Build`).
-2. **Brief + spawn the crewmate** → **`snd-brief`**: compose a **self-contained** brief (the crewmate
-   can't see frigate's docs — inline the task, how-to, and definition-of-done) and `herdr agent send` it
-   into the worktree pane. **Board** → stage `Build`, crew 🟢.
-3. **Supervise + converse** (via `snd-brief`) — the moment you dispatch, arm a **background**
-   `herdr wait agent-status <pane> --status done` (also wakes on `blocked`/idle) so the finish
-   re-invokes you; herdr won't page you otherwise, and an unwatched crew's finish gets missed. On wake,
-   `herdr agent read` the crew's **FLEET STATUS** block and respond: answer a `needs-decision`/`blocked`
-   with a one-line `herdr agent send` (or surface to the captain + board **Blocked**), collect the
-   `done` handoff. Short steers down, status blocks up. Run several crewmates concurrently (one
-   background wait each); **update the board** on every transition.
-4. **On done** — `herdr agent read <pane> --source recent` to review the crew's *validated* handoff
-   (pushed, CI green, tested), then **own the PR ceremony**: the pre-PR **`snd-jira-housekeeping`** gate,
-   then a **draft PR** (`gh pr create --draft --base RC`, body filled from the project's own
-   `.github/pull_request_template.md` per its `CLAUDE.md` § Pull Requests — the crewmate already has
-   these in context from the worktree), plus the Jira status transitions. A **non-draft PR is the
-   captain's call — never open one.** **Update the board** (`Testing`→`PR`→`Ready-for-Testing`).
-5. **Report** to the captain; move the row to **Recently done** when complete.
+The SDLC itself now lives **in the SND repo** as the `snd-sdlc` orchestrator + the `snd-*` phase skills
+(`docs/sdlc.md`). The mate's job is to *set up, launch, supervise* — the crew runs the whole pipeline.
+
+1. **Dispatch** → **`snd-brief`**: set up the worktree (branch off `RC` in the project's herdr workspace)
+   + provision the local `snd-*` skills, launch a crewmate, and brief it to drive the ticket via the
+   **`snd-sdlc`** skill in `auto` mode (**one phase per turn**). The crew owns the whole pipeline through
+   the draft PR. **Add a board row** (phase `Planning`→`Building`).
+2. **Supervise + converse** (via `snd-brief`) — the moment you dispatch, arm a **background**
+   `herdr wait agent-status <pane> --status done` (also wakes on `blocked`/idle) so the finish re-invokes
+   you; herdr won't page you otherwise, and an unwatched crew's finish gets missed. On wake, `herdr agent
+   read` the crew's **FLEET STATUS** block: answer a `needs-decision`/`blocked` with a one-line `herdr
+   agent send` (or surface to the captain + board **Blocked**); use its `phase:` to advance the board's
+   phase track, and on a plain `ok` **continue the crew** (in `auto` you're its per-phase continue button —
+   `herdr agent send "continue"`). Short steers down, status blocks up. Run several crewmates concurrently
+   (one background wait each).
+3. **On `done`** — the crew already ran `snd-pr` + `snd-jira`, so the **draft PR is open and the story is
+   In Progress** (a draft PR is the captain's review; *Ready for Review* — the team's review — is set only
+   when the captain flips it out of draft). There's **no mate PR/Jira ceremony** anymore. Sanity-check the
+   `handoff` (branch, PR #, tests), move the board to **Review**, and **surface to the captain**.
+4. **Captain gates** — **Validation** (QA), flipping to a **non-draft PR**, and **Merge** are the
+   captain's calls. Surface them and track on the board; never open a non-draft PR or merge yourself.
+5. **Report** to the captain; move the row to **Recently done** when merged.
 
 ## The fleet board
 
@@ -86,8 +89,26 @@ whole fleet, which herdr can't know.
 
 - **Source of truth:** `fleet.json` — the ledger **you** maintain (one object per in-flight item:
   ticket, summary, project, stage, branch, worktree, jira, updated, blocked). Update it at **every
-  loop transition above.** Stages mirror the playbook: `Kickoff → Build → Housekeeping → Testing → PR
-  → Ready-for-Testing → Done`.
+  loop transition above.** Set `stage` to the granular playbook step — `Kickoff → Build → Housekeeping
+  → Squash → Testing → PR → Ready-for-Testing → Done`.
+- **SDLC phase track:** the board rolls each granular `stage` up to the **8 canonical phases**
+  — **Planning → Building → Housekeeping → Testing → Review → Validation → Merge → Shipped** — and
+  renders them as a progress track (`●●●◉○○○○`: ● done · ◉ current · ○ todo) so the captain sees
+  *where in the arc* a ticket is at a glance, not just a word. The rollup: Kickoff/spec → **Planning**;
+  Build → **Building**; Housekeeping → **Housekeeping**; Squash/push/CI + dev unit/E2E → **Testing**;
+  PR/code-review → **Review**; third-party QA (`Ready for Testing`) → **Validation**; green & mergeable
+  (CI passing, no conflicts — the captain's merge gate) → **Merge**; merged → **Shipped**. Note the
+  deliberate split: the dev's *own* testing is **Testing**; QA's manual pass is **Validation**.
+  Non-AIO projects with an unrecognized stage just show the raw word.
+- **Stacked rows:** the board is borderless (whitespace columns, a light `─` rule between tickets) so a
+  glyph-width miscount nudges a column instead of cracking a border. Each item spans two lines — a `↳`
+  continuation line tucks the **`jira` status under the ticket** and the optional **`substep` under the
+  phase**. Keep `substep` to **one terse token, never a sentence** — for a PR that's just `draft #1196`
+  (or `#1196` once it's non-draft); for tests `E2E on burner`. No trailing prose like "· captain merge
+  gate" or "· burner for review" (the phase already says where it is). So there's no separate Jira column;
+  set `jira` and `substep` on the ledger item and they tuck beneath with a `↳`. An item with neither stays
+  single-line. **Branch is not a grid column** (it mostly duplicates the ticket) — it still shows in the
+  blocked/handoff detail; keep setting `branch` on the ledger item.
 - **Render:** `bin/fleet` prints the board, overlaying **live crew status** from `herdr agent list`
   (joined on worktree path, so it survives herdr restarts — pane ids don't). `bin/fleet --write` also
   snapshots `FLEET.md` (committable). `FLEET_NO_HERDR=1 bin/fleet` renders static when herdr is down.
@@ -112,27 +133,31 @@ whole fleet, which herdr can't know.
 ## Booting the fleet (start of session)
 
 When you sit down as the mate: ensure a workspace per active project, reconcile `fleet.json` against
-`herdr agent list` (and Jira via `snd-jira-housekeeping` if stages are stale), and — if it isn't up —
+`herdr agent list` (and Jira directly via the Atlassian MCP if stages are stale), and — if it isn't up —
 stand up the live board pane. Then report the board to the captain.
 
 **herdr can lose state across restarts.** Workspaces (and their labels/ids) don't always survive a
 herdr restart, but the **git worktrees do** — so a ticket can show on the board (it joins on worktree
 path) with no workspace behind it. Reconciling means: for every live worktree, confirm a workspace
-exists (recreate on the worktree if not) and re-provision crew skills (kickoff only provisioned what
-existed *then*). `snd-brief` §2 does these checks before every dispatch — that's where the mechanics live.
+exists (recreate on the worktree if not) and re-provision crew skills (an earlier dispatch only
+provisioned what existed *then*). `snd-brief` does these checks before every dispatch — that's where the
+mechanics live.
 
 ## Skill placement (mate vs crew)
 
 Skills resolve from the running agent's cwd. The mate runs at `cwd=frigate`; crewmates at
 `cwd=<worktree>` — so skills split by who runs them:
 
-- **Mate skills** (`snd-kickoff`, `snd-jira-housekeeping`) → live in `frigate/.claude/skills/`.
-- **Crew skills** (brainstorming, subagent-driven-development, fixbugs, backend-i18n,
-  code-review/simplify, gravi-burners, `housekeeping`) → **project repo, local scope**
-  (`<project>/.claude/skills/`, ignored via the repo's `.git/info/exclude` entry `**/.claude/skills/`,
-  which ignores *untracked* skills so tracked team skills stay). The mate **provisions** each
-  local-only skill into each worktree at kickoff via symlink (skip tracked skills). **Graduate** one
-  with `git add -f .claude/skills/<name>` + commit to RC, then drop its symlink. superpowers
+- **Mate skill** (`snd-brief` — set up worktree, launch the crew on `snd-sdlc`, supervise) → lives in
+  `frigate/.claude/skills/`. **The SDLC itself is crew-side** in the SND repo (the `snd-sdlc` orchestrator
+  + the `snd-*` phase skills).
+- **Crew skills** (the `snd-*` SDLC set — `snd-sdlc`, `snd-kickoff`, `snd-housekeeping`, `snd-testing`,
+  `snd-pr`, `snd-jira`, `snd-merge-check` — plus brainstorming, subagent-driven-development, backend-i18n,
+  code-review/simplify, gravi-burners) → **project repo, local scope** (`<project>/.claude/skills/`,
+  ignored via the repo's `.git/info/exclude` entry `**/.claude/skills/`, which ignores *untracked* skills
+  so tracked team skills stay). The mate **provisions** each local-only skill into each worktree at
+  dispatch (`snd-brief`) via symlink (skip tracked skills). **Graduate** one with
+  `git add -f .claude/skills/<name>` + commit to RC, then drop its symlink. superpowers
   (brainstorming/SDD) is a plugin → enable at **user scope** so crewmates get it.
 
 Full rationale: `docs/snd-aio-sdlc.md` → **Orchestration**.
@@ -161,7 +186,8 @@ Installs land in `.claude/skills/<name>/` and are tracked in `skills-lock.json`.
 - `herdr` — `ogulcancelik/herdr` (drive herdr from inside it; gated on `HERDR_ENV=1`).
 - `gravi-cli` — umbrella for the `gravi` CLI; defers burner lifecycle to `gravi-burners`.
 - `gravi-burners` — `gravi burner` lifecycle (start / autosync / recreate / restart / logs / pods …).
-- `snd-kickoff`, `snd-jira-housekeeping` — AIO mate-tier SDLC skills.
+- `snd-brief` — the mate's dispatch skill (worktree setup + launch the crew on `snd-sdlc` + supervise).
+  The SDLC skills themselves (`snd-sdlc`, `snd-kickoff`, `snd-jira`, `snd-pr`, …) are crew-side in the SND repo.
 
 ### Plugins (Claude Code, project-scoped)
 
@@ -178,8 +204,9 @@ crewmates to get these, also enable superpowers at **user scope** (see Skill pla
 
 ### Skill naming & skill-vs-context
 
-**Prefix project-specific skills by product:** AIO = `snd-` (`snd-kickoff`, `snd-jira-housekeeping`,
-`snd-testing`, …). A future project gets its own prefix (crossroads → `xr-`/`cr-`). Cross-project
+**Prefix project-specific skills by product:** AIO = `snd-` (`snd-sdlc`, `snd-kickoff`, `snd-jira`,
+`snd-pr`, `snd-testing`, … — crew-side in the SND repo). A future project gets its own prefix
+(crossroads → `xr-`/`cr-`). Cross-project
 skills stay **unprefixed** (`brainstorming`, `subagent-driven-development`, `gravi-burners`, `gravi-cli`,
 `herdr`, `skill-creator`).
 

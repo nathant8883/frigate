@@ -1,8 +1,19 @@
 # supply_and_dispatch_aio — SDLC & operating manual
 
-> AIO is the core product. Other projects follow a **similar but not identical** process.
-> This is both the **spec** for AIO's lifecycle and the **per-ticket playbook** a crewmate follows —
-> the backbone the frigate orchestrator drives. Captured 2026-06-30. **[TBD]** = to define as we build.
+> **The project-intrinsic SDLC now lives authoritatively inside the SND repo** at
+> `projects/supply_and_dispatch_aio/docs/sdlc.md` (the 8 phases, branch model, Jira rules, PR
+> conventions, and the `snd-*` skill set) — self-contained and herdr-free so any dev or crew can run it.
+> **This doc retains only the mate/herdr-orchestration layer** (workspaces, worktree provisioning,
+> dispatch) that wraps that SDLC. When the two disagree, the SND copy wins for SDLC content.
+>
+> **Historical below:** the *Per-ticket playbook*, *Jira rules*, *Stage → skill map*, *Open definitions*,
+> and *Status* sections are **superseded** — the mate no longer runs an SDLC directly; it dispatches a crew
+> that runs the **`snd-sdlc`** skill (see the `snd-brief` skill). frigate's old `snd-kickoff` / `snd-jira-housekeeping`
+> are **retired**, replaced crew-side by `snd-kickoff` / `snd-jira` / `snd-pr` / `snd-sdlc` in the SND repo.
+> **Only the _Orchestration — herdr workspaces & skill placement_ section is current mate guidance.**
+>
+> AIO is the core product. Other projects follow a **similar but not identical** process. Captured
+> 2026-06-30; SDLC content relocated to SND 2026-07-01. **[TBD]** = to define as we build.
 
 ## Branch model
 
@@ -15,6 +26,25 @@ Promotion flows `RC → beta → sharedprod`. **Feature work branches off `RC`.*
 ## Per-ticket playbook
 
 One KB ticket flows through these stages. `→` marks the skill/tool that owns the stage.
+
+The fleet board groups these stages into **8 canonical phases** for at-a-glance visibility
+(rendered as a progress track, `●●●◉○○○○`):
+
+| Phase | Covers these stages | Jira status |
+|---|---|---|
+| **1 Planning** | Kick off (Jira intake + worktree) + spec/brainstorm | In Progress |
+| **2 Building** | Execute the implementation | In Progress |
+| **3 Housekeeping** | Simplify → code-review → BE/FE compliance table + autofix | In Progress |
+| **4 Testing** | Squash + push + CI → **dev's own** unit + E2E on a burner | In Progress |
+| **5 Review** | Draft PR (captain's review) → flipped out of draft (team's review) | In Progress → Ready for Review (on non-draft flip) |
+| **6 Validation** | **Third-party** manual QA | Ready for Testing |
+| **7 Merge** | Green & mergeable — CI passing, no conflicts (the captain's merge gate) | Ready for Testing |
+| **8 Shipped** | Merged to `RC` (then promoted `RC → beta → sharedprod`) | — / Done |
+
+The two testing-like phases are deliberately distinct: **Testing** is the dev's *own* unit + E2E
+(pre-PR); **Validation** is the *third-party* manual QA pass (post-review). **Merge** is the ready-to-
+merge gate the mate drives a ticket to (all green), and the actual merge → **Shipped** is the captain's
+call (consistent with draft-PR-only — never a full merge without the captain).
 
 1. **Kick off** → `snd-kickoff`
    Jira readiness heads-up → herdr worktree on `KB-XXX_descriptor` (off `RC`, in the project's
@@ -40,14 +70,20 @@ One KB ticket flows through these stages. `→` marks the skill/tool that owns t
      ```
 
 5. **Testing** — "hourglass": heavy unit + E2E.
-   - Unit: `uv run pytest` (backend).
-   - E2E + manual verification against a **burner** (ephemeral env booted off the branch image; loads a dataset; runs E2E suites) → `gravi-burners`. **[E2E / snd_tests run specifics TBD]**
+   - Unit: `uv run pytest` (backend); `yarn test` (FE).
+   - **E2E** — the pytest-bdd suite lives **in-repo** at `automation/snd_e2e` (read its `CLAUDE.md`). A
+     behaviour change + its E2E land in the **same PR**. For a user-facing change, add/extend a
+     `.feature` under `features/<area>/` + its steps (read app source under `../../frontend|backend` for
+     stable `data-testid`s). Authoring chain `/qa-feature`→`/qa-gen`→`/qa-heal` is **human-triggered**
+     (LLM-gateway cost + live burner) — surface the command; hand-author when it isn't run. Run against a
+     burner (`BURNER_KEY=… uv run pytest -k …`) or through mom (push → `snd_e2e` catalog → mom UI).
+   - Manual verification against a **burner** (ephemeral env booted off the branch image) → `gravi-burners`.
 
 6. **Draft PR** *(mechanical + rule — context, no skill)*
    - **First, the pre-PR Jira gate** → `snd-jira-housekeeping`: ≥2 Dev/Validate subtasks, in the current sprint, energy-point estimate. If a gap is unresolved, **stop — don't open the PR.**
    - Document **AC drift → Dev Implementation** section + post the **test-coverage comment** (gherkin + unit tests) → `snd-jira-housekeeping`.
    - Open a **draft** PR only: `gh pr create --draft --base RC --body "<filled template>"`. **Never a full/ready PR without the captain's approval** (full PRs create review noise for the team). Use snd_aio's own convention: the template at `.github/pull_request_template.md` (What / Why / Test plan / Files / Ticket) and the repo `CLAUDE.md` § Pull Requests — fill the body (never blank), pass `--body` not `--fill`, terse/factual tone (cf. #960/#958/#957). A crewmate in the worktree already has both in context (it auto-loads snd_aio's `CLAUDE.md`); the mate, at frigate, reads them from the repo when it opens the PR.
-   - Set the story to **Ready for Review** → `snd-jira-housekeeping`.
+   - **Leave the story *In Progress*** — a draft PR is the captain's review, not the team's. The story moves to **Ready for Review** only when the captain approves and the PR is flipped **out of draft** (the captain's gate) → `snd-jira`.
 
 7. **Ready for Testing** → `snd-jira-housekeeping`
    Once dev + E2E are done and it's ready for third-party manual validation, move the story to **Ready for Testing**.
@@ -119,7 +155,7 @@ secret. frigate's project-scope enable stays for the mate.
 - Every story: **≥2 subtasks — Dev & Validate**.
 - Must be in the **current sprint** before it can be PR'd.
 - Must have an **energy-point** estimate.
-- Statuses: **In Progress** (work started) → **Ready for Review** (PR open) → **Ready for Testing** (dev complete, e2e done; ready for third-party manual validation).
+- Statuses: **In Progress** (work started — and through the **draft**-PR window, the captain's review) → **Ready for Review** (PR **out of draft** — the team's review) → **Ready for Testing** (dev complete, e2e done; ready for third-party manual validation).
 - **AC drift:** acceptance criteria often shift during dev — document adjustments in a **Dev Implementation** section on the ticket (reflect what was *actually* delivered; leave the original AC intact).
 - **Test coverage:** document in a ticket comment — the gherkin from `snd_tests` (if applicable) + the unit tests added.
 - Jira: `gravitatedxp.atlassian.net`, project `KB`, via the Atlassian MCP.
