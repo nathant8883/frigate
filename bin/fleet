@@ -11,11 +11,16 @@ fleet.json is the mate's source of truth. The Crew column is overlaid live from 
 render time, joined on worktree path (cwd) — durable across herdr restarts (pane ids are not).
 Run it on a refresh loop for a live dashboard:  watch -n 5 /home/nturner/frigate/bin/fleet
 """
-import json, os, subprocess, sys
+import json, os, re, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(ROOT, "fleet.json")
 SNAPSHOT = os.path.join(ROOT, "FLEET.md")
+
+# Layout knobs — Summary is capped so it can't wrap a narrow (split-pane) terminal;
+# overflow truncates with an ellipsis. Tune to your pane width.
+SUMMARY_W = 42
+SUBSTEP_W = 38   # phase substep (PR #, test target) on the stacked continuation line
 
 CREW = {
     "working": "🔄 working",
@@ -50,6 +55,69 @@ def pad(s, w):
     return s + " " * max(0, w - dwidth(s))
 
 
+# --- SDLC phase track -------------------------------------------------------
+# The canonical AIO pipeline. A task's granular ledger `stage` (Kickoff, Build,
+# Squash, PR, Ready-for-Testing, …) rolls up to one of these phases so the board
+# shows an at-a-glance progress track instead of a bare word. Order matters.
+# Tail: Review (code review) → Validation (3rd-party QA) → Merge (green & mergeable:
+# CI passing, no conflicts — the captain's merge gate) → Shipped (merged).
+PHASES = ["Planning", "Building", "Housekeeping", "Testing",
+          "Review", "Validation", "Merge", "Shipped"]
+# short labels for the legend line only (cells still show the full PHASES names),
+# so the 8-phase key fits on one line in a narrow pane.
+_PHASE_ABBR = ["Plan", "Build", "House", "Test", "Review", "Valid", "Merge", "Ship"]
+
+# tolerant map: compact (alphanumeric-only, lowercased) stage token -> phase index.
+# Lets the mate keep noting fine-grained, skill-linked stages while the board renders
+# the rollup. Multi-word Jira statuses match as a whole — "readyfortesting" is
+# third-party QA → Validation, deliberately NOT the dev's own Testing phase.
+_STAGE_TO_PHASE = {
+    "kickoff": 0, "planning": 0, "plan": 0, "spec": 0, "intake": 0, "brainstorm": 0,
+    "build": 1, "building": 1, "dev": 1, "implement": 1, "code": 1, "coding": 1,
+    "housekeeping": 2, "cleanup": 2, "simplify": 2,
+    "testing": 3, "test": 3, "e2e": 3, "unittest": 3,
+    "squash": 3, "squashpush": 3, "push": 3, "ci": 3,
+    "review": 4, "pr": 4, "codereview": 4, "readyforreview": 4, "inreview": 4,
+    "validation": 5, "validate": 5, "qa": 5, "readyfortesting": 5, "manualqa": 5,
+    "merge": 6, "readytomerge": 6, "mergeable": 6, "approved": 6,
+    "shipped": 7, "merged": 7, "done": 7, "ship": 7, "complete": 7,
+}
+PH_DONE, PH_CUR, PH_TODO = "●", "◉", "○"   # done · current · todo — all single-width
+
+
+def phase_of(stage):
+    """(index, name) for a granular stage; (None, raw) if it maps to no known phase."""
+    raw = str(stage).strip()
+    compact = re.sub(r"[^a-z0-9]", "", raw.lower())   # "Ready for Testing" -> "readyfortesting"
+    if compact in _STAGE_TO_PHASE:
+        i = _STAGE_TO_PHASE[compact]
+        return i, PHASES[i]
+    for i, p in enumerate(PHASES):                    # already a canonical phase name?
+        if compact == p.lower():
+            return i, p
+    m = re.match(r"[a-z0-9]+", raw.lower())            # first token, e.g. "squash + push" -> "squash"
+    if m and m.group(0) in _STAGE_TO_PHASE:
+        i = _STAGE_TO_PHASE[m.group(0)]
+        return i, PHASES[i]
+    return None, raw
+
+
+def phase_cell(stage):
+    """`●●◉○○ Housekeeping` — the progress track + phase name. Any substep (PR #,
+    test target) is rendered separately on the stacked secondary line, not here."""
+    i, name = phase_of(stage)
+    if i is None:                           # non-AIO project / unknown stage → raw text
+        return name or "—"
+    track = "".join(PH_DONE if j < i else PH_CUR if j == i else PH_TODO
+                    for j in range(len(PHASES)))
+    return f"{track} {name}"
+
+
+def phase_legend():
+    steps = " ".join(f"{i + 1} {a}" for i, a in enumerate(_PHASE_ABBR))
+    return f"Phase: {steps}   ({PH_DONE} done {PH_CUR} now {PH_TODO} todo)"
+
+
 def live_status_by_cwd():
     """worktree path -> (crew label, pane_id). None if herdr is unavailable/skipped."""
     if os.environ.get("FLEET_NO_HERDR"):
@@ -78,38 +146,85 @@ def load_ledger():
 def render():
     led = load_ledger()
     live = live_status_by_cwd()
+    # Borderless columns with a light rule between tickets. Each ticket is a primary
+    # line (ticket / summary / project / phase-track / crew) plus an optional
+    # continuation line that tucks the Jira status under the ticket and any phase
+    # substep (PR #, test target) under the phase — each marked with a ↳ so it clearly
+    # hangs off the row above. No vertical borders: a glyph-width miscount then just
+    # nudges a column instead of cracking a border. Branch dropped from the grid (it
+    # mostly duplicates the ticket) — it still shows in the blocked/handoff detail.
     cols = [("ticket", "Ticket"), ("summary", "Summary"), ("project", "Project"),
-            ("stage", "Stage"), ("crew", "Crew"), ("loc", "Branch"),
-            ("jira", "Jira")]
-    rows = []
+            ("phase", "Phase"), ("crew", "Crew")]
+    GAP, LEAD = 3, " "
+    rows = []   # list of (primary dict, jira status, phase substep)
     for it in led.get("in_flight", []):
         wt = (it.get("worktree") or "").rstrip("/")
         if live is None:
-            crew, pane = HERDR_DOWN, it.get("pane", "")
+            crew = HERDR_DOWN
         elif wt in live:
-            crew, pane = live[wt]
+            crew = live[wt][0]
         else:
-            crew, pane = NO_AGENT, ""
+            crew = NO_AGENT
         if it.get("blocked"):          # mate flagged it → needs captain feedback; overrides live status
             crew = FEEDBACK
-        rows.append({
-            "ticket": it.get("ticket", "—"), "summary": trunc(it.get("summary", ""), 24),
-            "project": it.get("project", ""), "stage": it.get("stage", ""), "crew": crew,
-            "loc": trunc(it.get("branch", ""), 28), "jira": it.get("jira", "—"),
-        })
-    widths = {k: max([dwidth(h)] + [dwidth(r[k]) for r in rows]) for k, h in cols}
+        primary = {
+            "ticket": it.get("ticket", "—"), "summary": trunc(it.get("summary", ""), SUMMARY_W),
+            "project": it.get("project", ""), "phase": phase_cell(it.get("stage", "")),
+            "crew": crew,
+        }
+        jira = it.get("jira", "")
+        jira = jira if (jira and jira != "—") else ""
+        substep = trunc(it.get("substep", ""), SUBSTEP_W) if it.get("substep") else ""
+        rows.append((primary, jira, substep))
 
-    def row_line(vals):
-        return "| " + " | ".join(pad(v, widths[k]) for (k, _), v in zip(cols, vals)) + " |"
+    order = [k for k, _ in cols]
+    left_order = [k for k in order if k != "crew"]     # crew is placed separately, far right
+    widths = {k: max([dwidth(h)] + [dwidth(p.get(k, "")) for p, _, _ in rows])
+              for k, h in cols}
+
+    def col_start(target):                 # display offset where a left-block column begins
+        off = dwidth(LEAD)
+        for k in left_order:
+            if k == target:
+                break
+            off += widths[k] + GAP
+        return off
+    phase_start = col_start("phase")
+    # Push Crew out to its own column on the far right — with the left block a fixed
+    # width, the status icons line up in a single vertical stripe that's trivial to
+    # scan down. CREW_GAP is the empty channel between the phase track and that stripe.
+    CREW_GAP = 8
+    crew_x = col_start("phase") + widths["phase"] + CREW_GAP
+    total_w = crew_x + widths["crew"]
+
+    def primary_line(d):
+        left = LEAD + (" " * GAP).join(pad(d.get(k, ""), widths[k]) for k in left_order)
+        return (pad(left, crew_x) + d.get("crew", "")).rstrip()
+
+    def cont_line(jira, substep):
+        left = LEAD + ("  ↳ " + jira if jira else "")
+        if jira and dwidth(left) > phase_start - 1:      # don't let jira collide with the substep's ↳
+            budget = phase_start - 1 - dwidth(LEAD + "  ↳ ")
+            left = LEAD + "  ↳ " + trunc(jira, max(1, budget))
+        seg = pad(left, phase_start)                     # place substep's ↳ under the phase column
+        if substep:
+            seg += "↳ " + substep
+        return seg.rstrip()
 
     stamp = "static (herdr skipped/down)" if live is None else "live"
+    rule = LEAD + "─" * max(0, total_w - dwidth(LEAD))
     out = [f"# Fleet — in-flight work   ·   crew = {stamp}", "",
-           row_line([h for _, h in cols]),
-           "|" + "|".join("-" * (widths[k] + 2) for k, _ in cols) + "|"]
-    for r in rows:
-        out.append(row_line([r[k] for k, _ in cols]))
-    if not rows:
-        out.append("_(nothing in flight)_")
+           phase_legend(), "",
+           primary_line({k: h for k, h in cols})]
+    for p, jira, substep in rows:
+        out.append(rule)
+        out.append(primary_line(p))
+        if jira or substep:
+            out.append(cont_line(jira, substep))
+    if rows:
+        out.append(rule)                     # close the table off at the bottom
+    else:
+        out += [rule, "_(nothing in flight)_"]
 
     blocked = [it for it in led.get("in_flight", []) if it.get("blocked")]
     if blocked:
