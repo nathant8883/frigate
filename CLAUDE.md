@@ -62,9 +62,10 @@ The SDLC itself now lives **in the SND repo** as the `snd-sdlc` orchestrator + t
 (`docs/sdlc.md`). The mate's job is to *set up, launch, supervise* — the crew runs the whole pipeline.
 
 1. **Dispatch** → **`snd-brief`**: set up the worktree (branch off `RC` in the project's herdr workspace)
-   + provision the local `snd-*` skills, launch a crewmate, and brief it to drive the ticket via the
-   **`snd-sdlc`** skill in `auto` mode (**one phase per turn**). The crew owns the whole pipeline through
-   the draft PR. **Add a board row** (phase `Planning`→`Building`).
+   + provision the local `snd-*` skills, launch a crewmate **in plan mode** (`claude --permission-mode
+   plan` — the design rail), and brief it to drive the ticket via the **`snd-sdlc`** skill in `auto` mode
+   (**one phase per turn**). The crew owns the whole pipeline through the draft PR. **Add a board row**
+   (phase `Planning`→`Building`).
 2. **Supervise + converse** (via `snd-brief`) — the moment you dispatch, arm a **background**
    `herdr wait agent-status <pane> --status done` (also wakes on `blocked`/idle) so the finish re-invokes
    you; herdr won't page you otherwise, and an unwatched crew's finish gets missed. On wake, `herdr agent
@@ -73,6 +74,12 @@ The SDLC itself now lives **in the SND repo** as the `snd-sdlc` orchestrator + t
    phase track, and on a plain `ok` **continue the crew** (in `auto` you're its per-phase continue button —
    `herdr agent send "continue"`). Short steers down, status blocks up. Run several crewmates concurrently
    (one background wait each).
+   - **The plan gate (Planning).** The crew's **first `blocked` is the design gate** — booted in plan mode,
+     it presents a plan (ExitPlanMode) before it can build; the plan lands in `~/.claude/plans/*.md`.
+     **Triage it:** *auto-approve* routine plans yourself (`herdr pane send-keys <pane> Enter`, board
+     substep `plan auto-ok`); *relay substantive* plans (new pattern, schema/API, security/perf, ambiguous
+     AC) to the captain, approving or redirecting on their word. You're the relay; the captain owns the
+     design call. Mechanics live in `snd-brief` §4.
 3. **On `done`** — the crew already ran `snd-pr` + `snd-jira`, so the **draft PR is open and the story is
    In Progress** (a draft PR is the captain's review; *Ready for Review* — the team's review — is set only
    when the captain flips it out of draft). There's **no mate PR/Jira ceremony** anymore. Sanity-check the

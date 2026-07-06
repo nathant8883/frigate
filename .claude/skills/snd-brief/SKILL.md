@@ -65,6 +65,10 @@ here; don't touch other worktrees or the main checkout. Drive this ticket with t
 **one phase per turn**, with Jira handled across it, per your `docs/sdlc.md`. You own it **through the
 draft PR + Ready for Review**. **Never open a non-draft PR** — that's the captain's call.
 
+**You start in plan mode — design first.** Your very first job is to read the ticket + the relevant code
+and **present an implementation plan** (ExitPlanMode). That's the design gate: I review/approve it before
+you build. Don't create the branch or move Jira until it's approved — `snd-kickoff` walks you through it.
+
 **Report — one phase per turn, FLEET STATUS.** I'm the **mate**, watching you through herdr, not a human at
 a keyboard. Do **one phase, then end your turn** on a FLEET STATUS block (as `snd-sdlc` directs) so herdr
 marks you idle and I can read it — I'll continue you into the next phase (or answer a decision):
@@ -99,13 +103,18 @@ herdr workspace create --cwd <worktree> --label <ticket-descriptor> --no-focus
 workspace's root pane:
 
 ```bash
-herdr pane run <root_pane> "claude"          # <root_pane> from (a)
-# or into an already-open project workspace:  herdr agent start KB-XXXXX --workspace <ws> --cwd <worktree> -- claude
+herdr pane run <root_pane> "claude --permission-mode plan"   # <root_pane> from (a) — boots in plan mode
+# or into an already-open project workspace:
+#   herdr agent start KB-XXXXX --workspace <ws> --cwd <worktree> -- claude --permission-mode plan
 ```
+
+**`--permission-mode plan` is the design rail** — the crew boots read-only and *must* present a plan
+(ExitPlanMode) before it can write code, so the design gate (step 4) can't be skipped.
 
 > **Skills load at startup.** If provisioning added a skill *after* the agent was already running, it
 > won't see it — restart the pane: `/exit` (Ctrl-C only clears the input; herdr rejects `C-d`), then
-> `herdr pane run <pane> "claude"` again.
+> `herdr pane run <pane> "claude --permission-mode plan"` again (a just-provisioned crew is still at
+> Planning, so it should reboot into the plan gate).
 
 **c. Deliver the brief.** `herdr agent send` writes literal text but does **not** press Enter — submit
 separately. A multi-line brief is easiest from a file (backticks/newlines survive intact):
@@ -142,12 +151,41 @@ Act on `state:` — and use `phase:` to move the board's phase track:
   crew's `snd-pr` + `snd-jira` did it.
 - **needs-decision** → if it's yours, `herdr agent send <pane> "<decision>"` and `wait` again. If it's the
   captain's call, surface it (board **Blocked** + a ping) and hold.
-- **blocked** → resolve with a one-line steer if you can, else surface to the captain; put the crew's
-  `question:` in the board's Blocked section.
+- **blocked** → **first: is it the plan gate?** Read the pane (`herdr agent read <pane>`) — if you see the
+  ExitPlanMode prompt (*"Ready to code?" / "Would you like to proceed?"*), handle it per **The plan gate**
+  below. Otherwise it's a work block — resolve with a one-line steer if you can, else surface to the
+  captain; put the crew's `question:` in the board's Blocked section.
 - **failed** → read the evidence, report to the captain, decide retry vs. hand back.
 
 Keep the loop tight — **answer → `herdr agent send` → re-arm the background `herdr wait`**. Short steers
 down, FLEET STATUS blocks up. That's the conversation.
+
+### The plan gate (Planning phase)
+
+The crew boots in **plan mode**, so its **first `blocked` is the design gate** — it has produced an
+implementation plan and is waiting for approval before it can write code. The plan is persisted to
+`~/.claude/plans/*.md` (newest file) and shown in the pane. Read it, then **triage** — this is where you
+absorb the trivial and escalate the real design calls:
+
+- **Auto-approve (routine)** — approve it yourself when the plan is single-file-ish, adds **no** new
+  model/endpoint/pattern, changes **no** user-facing behavior, and matches existing conventions:
+
+  ```bash
+  herdr pane send-keys <pane> Enter      # selects "Yes, and use auto mode" → crew builds autonomously
+  ```
+
+  **Record it** so the captain sees what bypassed them — set the board substep to `plan auto-ok`.
+
+- **Escalate (substantive)** — a real design choice, a schema/API change, a new pattern, security/perf
+  sensitivity, ambiguous AC, or you're simply unsure → **relay the plan to the captain** (board **Blocked**
+  + ping; the `~/.claude/plans/*.md` file is the artifact to share). On the captain's word:
+  - **approve** → `herdr pane send-keys <pane> Enter`
+  - **redirect** → select *"Tell Claude what to change"* (read the pane for its option number, e.g. `4`):
+    `herdr pane send-keys <pane> 4`, then `herdr agent send <pane> "<captain's feedback>"` + `send-keys
+    <pane> Enter`.
+
+After approval the crew flips to auto mode and proceeds; from there it's the normal one-phase-per-turn
+loop. **When in doubt, escalate** — you're the relay, the captain owns the design call.
 
 ## Notes
 
