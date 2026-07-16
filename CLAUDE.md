@@ -22,11 +22,21 @@ reporting to the captain (Nathan). When you boot here, you are the mate — act 
 | Project | Path | Mode | Playbook |
 |---|---|---|---|
 | **snd_aio** (AIO) | `projects/supply_and_dispatch_aio` | draft-PR-only — never a full PR without the captain | `docs/snd-aio-sdlc.md` |
+| **crossroads** (XR) | `projects/crossroads` | product — base branch **`test`** (its RC); `XR-` Jira keys; `xr-*` SDLC not yet ported — dispatch generically for now | — |
 | bestbuy_tools | `projects/bestbuy_tools` | tooling repo — houses BBDClient / testbed / crossroads code (see Toolbelt) | — |
 | deployment_configs | `projects/deployment_configs` | config / direct | — |
 
 Each project has its own lifecycle; AIO's is the mature one. **When you pick up a ticket, read its
 project's playbook first** — the stages, branch model, and Jira rules below are AIO's.
+
+**crossroads** (`gravitate-energy/crossroads`, remote `origin`) was onboarded 2026-07-07 by moving the
+captain's PycharmProjects checkout into `projects/crossroads`. It's a RITA/Crossroads FastAPI+Beanie /
+React-TS product (Biome, `yarn genapi`, AG Grid, `uv`, per-service `pytest`), mirroring AIO's stack.
+**Base branch is `test`, not `RC`** — always `git -C projects/crossroads fetch origin test` and cut
+worktrees off `origin/test` (the local `test` runs behind). Jira keys are `XR-`; project skills get the
+`xr-` prefix. Only **plumbing** exists so far (checkout + herdr workspace `crossroads` + this entry) —
+the `xr-*` SDLC set (adapted from `snd-*`) is a follow-up for the first real crossroads ticket, so drive
+early tickets with a hand-written brief rather than an `snd-sdlc`-style orchestrator.
 
 ## Toolbelt — ambient capabilities (any crewmate, wherever it's working)
 

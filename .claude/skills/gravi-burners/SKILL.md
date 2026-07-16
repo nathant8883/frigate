@@ -62,8 +62,8 @@ gravi burner start --build <branch> --ttl 8 --dataset default [--sync] [--json]
 gravi burner list
 gravi burner status <id>                 # Status / URL / TTL / build / seed
 gravi burner delete <id>
-gravi burner recreate <id> [--sync]      # full redeploy w/ latest builds + re-seed (see below)
-gravi burner autosync trigger <id>       # roll deployments onto rebuilt images IN PLACE (see below)
+gravi burner autosync trigger <id>       # DEFAULT refresh: roll deployments onto rebuilt images IN PLACE, data kept (see below)
+gravi burner recreate <id> [--sync]      # DESTROYS + re-seeds (total data loss) — NOT a refresh; deployment_main/migration changes only (see below)
 gravi burner autosync enable|disable|status <id>
 gravi burner restart <id> <service>      # rolling-restart ONE deployment's pods in place (e.g. backend)
 gravi burner logs <id> <service>         # e.g. backend
@@ -79,29 +79,46 @@ gravi config <id> [--format json|env]    # url / conn_str / dbs / status / expir
 ## Refreshing a running burner after a new push (the key decision)
 
 You pushed a fix and the new image is green. How you get it onto an existing burner depends on
-**what changed** — this distinction matters and is easy to get wrong:
+**what changed** — this distinction matters and is easy to get wrong.
+
+> **Default to `autosync trigger`.** For the common case — a frontend/backend **code or UI change**
+> — `autosync trigger` is the right tool: it swaps the rebuilt image in place in seconds and keeps
+> the seed. **`recreate` is the exception, not the default** — only reach for it when you genuinely
+> need a full teardown + re-seed (a `deployment_main` change; see below). Recreate throws away the
+> whole seed (the slow "creating stores/tanks/forecasts…" phase) and has to rebuild it from scratch,
+> so using it just to pick up code wastes minutes **and** exposes you to the teardown race below.
 
 - **`gravi burner autosync trigger <id>`** — rolls the burner's deployments onto the rebuilt
   images **in place**. Fast, and the **MongoDB data is preserved** (just the pods restart). It only
   swaps images whose tag actually changed (a backend-only push won't roll the frontend, etc.).
   **Use this for image-only changes** — frontend changes, or backend app/endpoint code.
-  It does **NOT** re-run `deployment_main`.
+  It does **NOT** re-run `deployment_main`. (`gravi burner autosync enable <id>` makes this
+  automatic — worth it if you'll push several times against one burner, e.g. iterating on review
+  feedback.) A plain `gravi burner restart <id> <service>` will **not** pick up a new build: AIO
+  tags images per-commit-SHA, so the deployment still references the old SHA until autosync/recreate
+  rewrites the manifest — restart just bounces the same image.
 
 - **`gravi burner recreate <id>`** — tears down and **fully redeploys** with the latest builds and
-  **re-seeds** the data, keeping the same id/URL. Use this when the change is in
+  **re-seeds** the data, keeping the same id/URL. **Only** use this when the change is in
   **`deployment_main`** (the deploy routine in `backend/deployment_script.py`: DB index
   maintenance, migrations, default-data setup). Those run **only on a full deploy** — app
   startup/lifespan only runs cache warmup (`warm_caches`), **not** `deployment_main` — so a plain
-  `autosync` won't apply an index/migration change. Caveat: `recreate` has been seen to **flake**
-  (abort right after name allocation, leaving the burner `deleted`). If it fails, just
-  `gravi burner start` a fresh one — `start` is more reliable; you get a new id/URL.
+  `autosync` won't apply an index/migration change. **Recreate is flaky and it's a teardown, so it
+  can leave you with no burner at all:**
+  - It's been seen to abort right after name allocation, leaving the burner `deleted`.
+  - The teardown can **win the race against its own re-create**: the delete completes but the
+    re-create hits `409 … object is being deleted: namespaces "burner-<id>" already exists`,
+    leaving the burner stuck `deleting` with nothing to redeploy onto (hit on KB-45480, 2026-07).
+
+  Recovery either way: **wait for the delete to fully finish** (`gravi burner list` until the id is
+  gone), then `gravi burner start` a fresh one — `start` is more reliable; you get a new id/URL.
 
 - **`gravi burner restart <id> <service>`** — rolling-restarts just that one deployment's pods
   **without changing images or data**. Use it to clear a stuck/unhealthy pod or force a re-read of
   mounted config — **not** to pick up a new build (that's `autosync`).
 
-Rule of thumb: **code/UI change → `autosync trigger`; index/migration/seed change → `recreate`
-(or a fresh `start`); stuck pod → `restart`.**
+Rule of thumb: **code/UI change → `autosync trigger` (the default); index/migration/seed change in
+`deployment_main` → `recreate` (or a fresh `start`); stuck pod → `restart`.**
 
 ## Operational gotchas
 

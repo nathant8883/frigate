@@ -21,15 +21,29 @@ This is the mate's single dispatch skill: *set up → launch → supervise → c
 
 ## 1. Set up the worktree
 
-Create an isolated worktree on the feature branch off `RC`, in the project's herdr workspace (the mate
-keeps one workspace per project — `herdr workspace list` for the id). Branch: **`KB-XXXXX_descriptor`**
-(key + a 1–2 word summary):
+**Always pull the latest RC first.** `--base RC` resolves the *local* `RC` ref, which lags the remote —
+basing a new worktree off it silently starts the ticket behind the latest code (a real problem: crews end
+up developing significantly behind). So **fetch RC, then base off the freshly-fetched remote-tracking
+ref**, never the bare local `RC`:
 
 ```bash
-herdr worktree create --workspace <project-ws> --branch KB-XXXXX_descriptor --base RC
-# or by path if that workspace isn't open yet:
-herdr worktree create --cwd <repo> --branch KB-XXXXX_descriptor --base RC
+git -C <repo> fetch supply_and_dispatch_aio RC        # pull latest RC before EVERY new worktree
+git -C <repo> rev-parse --short supply_and_dispatch_aio/RC   # sanity: this is the tip the branch starts from
 ```
+
+Then create an isolated worktree on the feature branch off the just-fetched RC, in the project's herdr
+workspace (the mate keeps one workspace per project — `herdr workspace list` for the id). Branch:
+**`KB-XXXXX_descriptor`** (key + a 1–2 word summary); base **`supply_and_dispatch_aio/RC`** (the
+remote-tracking ref, **not** local `RC`):
+
+```bash
+herdr worktree create --workspace <project-ws> --branch KB-XXXXX_descriptor --base supply_and_dispatch_aio/RC
+# or by path if that workspace isn't open yet:
+herdr worktree create --cwd <repo> --branch KB-XXXXX_descriptor --base supply_and_dispatch_aio/RC
+```
+
+> This applies to **any** worktree you create — via this skill or by hand (review checkouts, burner
+> branches, ad-hoc). Fetch RC first; base off `supply_and_dispatch_aio/RC`.
 
 The crew's Planning phase (`snd-kickoff`, via `snd-sdlc`) is **branch-aware** — it picks up this branch
 and does the Jira intake (sprint / subtasks / estimate / In Progress) itself; you don't pre-square Jira.
