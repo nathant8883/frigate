@@ -11,16 +11,41 @@ fleet.json is the mate's source of truth. The Crew column is overlaid live from 
 render time, joined on worktree path (cwd) — durable across herdr restarts (pane ids are not).
 Run it on a refresh loop for a live dashboard:  watch -n 5 /home/nturner/frigate/bin/fleet
 """
-import json, os, re, subprocess, sys
+import json, os, re, shutil, subprocess, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(ROOT, "fleet.json")
 SNAPSHOT = os.path.join(ROOT, "FLEET.md")
 
-# Layout knobs — Summary is capped so it can't wrap a narrow (split-pane) terminal;
-# overflow truncates with an ellipsis. Tune to your pane width.
-SUMMARY_W = 42
-SUBSTEP_W = 38   # phase substep (PR #, test target) on the stacked continuation line
+# Layout — the board flexes to fill the terminal width. Summary is the elastic column:
+# it soaks up whatever horizontal room the pane gives (within these bounds), and the
+# continuation-line Jira budget keys off it, so a wider pane means wider summaries and
+# less Jira truncation. Widen the dashboard pane and the board widens with it. Override
+# the auto-detected width with FLEET_WIDTH=<cols> (e.g. for FLEET.md snapshots).
+SUMMARY_MIN, SUMMARY_MAX = 20, 120
+SUBSTEP_MIN = 24     # phase substep (PR #, test target) floor on the stacked continuation line
+
+
+def term_width():
+    env = os.environ.get("FLEET_WIDTH")
+    if env and env.isdigit():
+        return int(env)
+    # Under `watch` stdout is a pipe, so query the controlling tty directly first — that's
+    # the real pane width — then fall back to stdout / a sane default.
+    try:
+        fd = os.open("/dev/tty", os.O_RDONLY)
+        try:
+            w = os.get_terminal_size(fd).columns
+        finally:
+            os.close(fd)
+        if w and w > 0:
+            return w
+    except Exception:
+        pass
+    try:
+        return shutil.get_terminal_size(fallback=(110, 40)).columns
+    except Exception:
+        return 110
 
 CREW = {
     "working": "🔄 working",
@@ -110,12 +135,12 @@ def phase_cell(stage):
         return name or "—"
     track = "".join(PH_DONE if j < i else PH_CUR if j == i else PH_TODO
                     for j in range(len(PHASES)))
-    return f"{track} {name}"
+    return f"{track} {_PHASE_ABBR[i]}"        # short label keeps the board narrow
 
 
 def phase_legend():
-    steps = " ".join(f"{i + 1} {a}" for i, a in enumerate(_PHASE_ABBR))
-    return f"Phase: {steps}   ({PH_DONE} done {PH_CUR} now {PH_TODO} todo)"
+    steps = " ".join(_PHASE_ABBR)          # no numbers — the track glyphs show position
+    return f"Phases: {steps}  ({PH_DONE}done {PH_CUR}now {PH_TODO}todo)"
 
 
 def live_status_by_cwd():
@@ -155,7 +180,7 @@ def render():
     # mostly duplicates the ticket) — it still shows in the blocked/handoff detail.
     cols = [("ticket", "Ticket"), ("summary", "Summary"), ("project", "Project"),
             ("phase", "Phase"), ("crew", "Crew")]
-    GAP, LEAD = 3, " "
+    GAP, LEAD = 2, " "
     rows = []   # list of (primary dict, jira status, phase substep)
     for it in led.get("in_flight", []):
         wt = (it.get("worktree") or "").rstrip("/")
@@ -168,19 +193,43 @@ def render():
         if it.get("blocked"):          # mate flagged it → needs captain feedback; overrides live status
             crew = FEEDBACK
         primary = {
-            "ticket": it.get("ticket", "—"), "summary": trunc(it.get("summary", ""), SUMMARY_W),
+            "ticket": it.get("ticket", "—"), "summary": str(it.get("summary", "")),
             "project": it.get("project", ""), "phase": phase_cell(it.get("stage", "")),
             "crew": crew,
         }
         jira = it.get("jira", "")
         jira = jira if (jira and jira != "—") else ""
-        substep = trunc(it.get("substep", ""), SUBSTEP_W) if it.get("substep") else ""
+        substep = str(it.get("substep", "")) if it.get("substep") else ""
         rows.append((primary, jira, substep))
 
     order = [k for k, _ in cols]
     left_order = [k for k in order if k != "crew"]     # crew is placed separately, far right
+    CREW_GAP = 2
+    TERM = term_width()
+    # Data columns size to their content. Summary widens further so the longest Jira line
+    # (which tucks under ticket+summary on the continuation line) fits without an ellipsis
+    # — solving phase_start ≥ len(LEAD + "  ↳ " + jira) + 1 for the summary width. Then
+    # clamp to [MIN, MAX] and to what the pane can show, so the board grows to fit its
+    # content (no truncation) instead of either wrapping or stretching into ragged gaps.
     widths = {k: max([dwidth(h)] + [dwidth(p.get(k, "")) for p, _, _ in rows])
-              for k, h in cols}
+              for k, h in cols if k != "summary"}
+    summary_content = max([dwidth("Summary")] + [dwidth(p["summary"]) for p, _, _ in rows])
+    max_jira = max([0] + [dwidth(j) for _, j, _ in rows if j])
+    max_substep = max([0] + [dwidth(s) for _, _, s in rows if s])
+    jira_need = max_jira + 5 - widths["ticket"] - widths["project"] - 3 * GAP
+    fixed = (dwidth(LEAD) + widths["ticket"] + widths["project"] + widths["phase"]
+             + GAP * (len(left_order) - 1) + CREW_GAP + widths["crew"])
+    # Fill: Summary stretches so the board spans the full pane width. Cap it so the crew
+    # stripe (right of the phase track) and the substep (tucked under the phase on the
+    # continuation line) still reach the edge without being squeezed off, and floor it at
+    # what the Summary text / longest Jira line need so those never truncate.
+    fill = min(SUMMARY_MAX,
+               TERM - fixed,                                          # room for the crew stripe
+               TERM - dwidth(LEAD) - widths["ticket"] - widths["project"]
+                    - 3 * GAP - dwidth("↳ ") - max_substep)           # room for the substep
+    widths["summary"] = max(SUMMARY_MIN, summary_content, jira_need, fill)
+    for p, _, _ in rows:                   # truncate summaries to the resolved width
+        p["summary"] = trunc(p["summary"], widths["summary"])
 
     def col_start(target):                 # display offset where a left-block column begins
         off = dwidth(LEAD)
@@ -190,12 +239,17 @@ def render():
             off += widths[k] + GAP
         return off
     phase_start = col_start("phase")
-    # Push Crew out to its own column on the far right — with the left block a fixed
-    # width, the status icons line up in a single vertical stripe that's trivial to
-    # scan down. CREW_GAP is the empty channel between the phase track and that stripe.
-    CREW_GAP = 8
+    # Crew is a tight stripe just past the phase track (CREW_GAP is the channel), so the
+    # status icons line up in a single easy-to-scan column right beside the phase.
     crew_x = col_start("phase") + widths["phase"] + CREW_GAP
-    total_w = crew_x + widths["crew"]
+    # substep tucks under the phase track; nothing sits to its right, so give it room out
+    # toward the pane edge (never below its floor) and let the table rule stretch to cover
+    # it — the widest line (primary or a substep continuation) sets the rule width.
+    substep_w = max(SUBSTEP_MIN, TERM - phase_start - dwidth("↳ "))
+    rows = [(p, jira, trunc(substep, substep_w) if substep else substep)
+            for p, jira, substep in rows]
+    cont_ends = [phase_start + dwidth("↳ " + s) for _, _, s in rows if s]
+    total_w = max([crew_x + widths["crew"]] + cont_ends)
 
     def primary_line(d):
         left = LEAD + (" " * GAP).join(pad(d.get(k, ""), widths[k]) for k in left_order)
