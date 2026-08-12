@@ -130,15 +130,19 @@ herdr pane run <root_pane> "claude --permission-mode plan"   # <root_pane> from 
 > `herdr pane run <pane> "claude --permission-mode plan"` again (a just-provisioned crew is still at
 > Planning, so it should reboot into the plan gate).
 
-**c. Deliver the brief.** `herdr agent send` writes literal text but does **not** press Enter — submit
-separately. A multi-line brief is easiest from a file (backticks/newlines survive intact):
+**c. Deliver the brief.** `herdr agent prompt` writes the text **and submits it** — no follow-up
+`send-keys Enter`. A multi-line brief is easiest from a file (backticks/newlines survive intact):
 
 ```bash
-herdr agent send <pane> "$(cat /tmp/brief-KB-XXXXX.md)"
-herdr pane send-keys <pane> Enter
+herdr agent prompt <pane> "$(cat /tmp/brief-KB-XXXXX.md)"
 ```
 
-Update the board: the ticket's row → the crew is 🔄 (auto once herdr sees the agent working).
+> `herdr agent send` was **removed** in 0.7.5. It doesn't error — it prints the `agent` usage block and
+> exits `0`, so a brief sent with it is silently never delivered. Same trap as the wait below.
+
+Update the board: add the ticket's row and **give the crew a name** — run `bin/fleet --next-name` and set
+that (the lowest free NATO word) as the row's `name`. It's the captain's handle for this crew member, so
+use it when you report on them. The crew cell goes 🔄 automatically once herdr sees the agent working.
 
 ## 4. Supervise + converse (the back-and-forth)
 
@@ -148,14 +152,29 @@ you while you stay free for other crews and the captain. Never leave a working c
 
 ```bash
 # run_in_background: true — you get re-invoked when the crew hits done/idle/blocked
-herdr wait agent-status <pane> --status done --timeout 1800000
+herdr agent wait <pane> --until done --timeout 1800000
 herdr agent read <pane> --source recent --lines 60            # then read its FLEET STATUS block
 ```
+
+> **Don't swallow the wait's exit code.** herdr renames subcommands between releases, and a removed one
+> prints usage and exits `0`/`2` — so `herdr … >/dev/null 2>&1; echo done` backgrounded reports success in
+> milliseconds and you supervise **nothing**. A wait that returns instantly is broken, not fast. Confirm
+> with `time herdr agent wait <pane> --until working --timeout 5000` (must take ~5s, exit 1).
+> `herdr wait agent-status` was the pre-0.7.5 spelling and is gone.
+
+You can also fuse the steer and the wait — useful for a routine continue:
+
+```bash
+herdr agent prompt <pane> "continue" --wait --until done --timeout 1800000
+```
+
+`--wait` doesn't track turns, though: if the crew is already working, that in-flight turn's completion can
+satisfy it. When you need the wait to mean *this* steer finished, prompt first, then wait separately.
 
 Act on `state:` — and use `phase:` to move the board's phase track:
 
 - **ok** → a phase boundary. The crew has **stopped and is waiting on you** (one phase per turn). Update
-  the board's phase, then **continue it** — `herdr agent send <pane> "continue"` + `herdr pane send-keys
+  the board's phase, then **continue it** — `herdr agent prompt <pane> "continue"` + `herdr pane send-keys
   <pane> Enter` — and re-arm the background wait. *This is what `auto` means: you, the mate, are the
   per-phase continue button, no human needed.* (In a captain-driven/non-auto dispatch, you'd surface the
   boundary and let the captain say continue.)
@@ -163,7 +182,7 @@ Act on `state:` — and use `phase:` to move the board's phase track:
   `handoff` (branch, PR #, tests), update the board (**Review**), and **surface to the captain** — the
   remaining gates (Validation/QA → Merge) are theirs. The mate no longer runs the PR/Jira ceremony; the
   crew's `snd-pr` + `snd-jira` did it.
-- **needs-decision** → if it's yours, `herdr agent send <pane> "<decision>"` and `wait` again. If it's the
+- **needs-decision** → if it's yours, `herdr agent prompt <pane> "<decision>"` and `wait` again. If it's the
   captain's call, surface it (board **Blocked** + a ping) and hold.
 - **blocked** → **first: is it the plan gate?** Read the pane (`herdr agent read <pane>`) — if you see the
   ExitPlanMode prompt (*"Ready to code?" / "Would you like to proceed?"*), handle it per **The plan gate**
@@ -171,8 +190,23 @@ Act on `state:` — and use `phase:` to move the board's phase track:
   captain; put the crew's `question:` in the board's Blocked section.
 - **failed** → read the evidence, report to the captain, decide retry vs. hand back.
 
-Keep the loop tight — **answer → `herdr agent send` → re-arm the background `herdr wait`**. Short steers
+Keep the loop tight — **answer → `herdr agent prompt` → re-arm the background `herdr agent wait`**. Short steers
 down, FLEET STATUS blocks up. That's the conversation.
+
+### Surfacing to the captain
+
+Anything that reaches the captain is **glyph lines** in the manual's *Voice* shape —
+`<glyph> **crew · ticket** — <the point>`. ❓ needs an answer · 🔴 needs intervention · 🔵 is status ·
+✅ is done. One topic per line, blank line between, two sentences max. Translate the crew's `question:`
+into the captain's terms; never forward "Alpha needs a decision" or paste a FLEET STATUS block at him.
+
+```
+❓ **Alpha · KB-49312** — are tractors in scope? yes/no
+
+🔴 **Bravo · KB-49288** — CI failed 3× on the same i18n check; it wants to skip the check, allow it?
+
+✅ **Charlie · KB-49301** — draft PR #1583, CI green; your review gate.
+```
 
 ### The plan gate (Planning phase)
 
@@ -195,7 +229,7 @@ absorb the trivial and escalate the real design calls:
   + ping; the `~/.claude/plans/*.md` file is the artifact to share). On the captain's word:
   - **approve** → `herdr pane send-keys <pane> Enter`
   - **redirect** → select *"Tell Claude what to change"* (read the pane for its option number, e.g. `4`):
-    `herdr pane send-keys <pane> 4`, then `herdr agent send <pane> "<captain's feedback>"` + `send-keys
+    `herdr pane send-keys <pane> 4`, then `herdr agent prompt <pane> "<captain's feedback>"` + `send-keys
     <pane> Enter`.
 
 After approval the crew flips to auto mode and proceeds; from there it's the normal one-phase-per-turn
