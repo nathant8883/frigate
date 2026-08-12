@@ -197,8 +197,12 @@ down, FLEET STATUS blocks up. That's the conversation.
 
 Anything that reaches the captain is **glyph lines** in the manual's *Voice* shape —
 `<glyph> **crew · ticket** — <the point>`. ❓ needs an answer · 🔴 needs intervention · 🔵 is status ·
-✅ is done. One topic per line, blank line between, two sentences max. Translate the crew's `question:`
-into the captain's terms; never forward "Alpha needs a decision" or paste a FLEET STATUS block at him.
+✅ is done. One topic per line, blank line between, two sentences max, and **at most one 🔵 per crew**
+(❓/🔴 stack on top of it; a second 🔵 is spam). Translate the crew's `question:` into the captain's
+terms; never forward "Alpha needs a decision" or paste a FLEET STATUS block at him.
+
+Dispatch is the usual offender: base ref, plan mode, provisioned skills and briefed rules are all
+**process**. Collapse them into the one 🔵, and give the open question its own ❓.
 
 ```
 ❓ **Alpha · KB-49312** — are tractors in scope? yes/no

@@ -52,6 +52,22 @@ Terminal output is markdown, so **colour isn't available** — the glyph carries
 inventing a fifth costs the set its at-a-glance meaning. They line up with the board's own language
 (🔴 feedback, 🐞 QA bug), so a red line here matches a red row there.
 
+### One 🔵 per crew — hard cap
+
+**A crew gets at most one 🔵 line in a report.** A 🔵 is that crew's *current state*, not a log of
+what you did to it — two blue lines for one crew is the two-sentence limit being spent twice on the
+same paragraph, which is the spam he asked you to stop.
+
+❓ and 🔴 are **separate asks** and stack freely — 🔵 + ❓ on one crew is right and expected. But
+🔵 + 🔵 never is.
+
+| ✗ two blues, one crew | ✓ one blue, one ask |
+|---|---|
+| 🔵 **Bravo · mom-sprint-hub** — dispatched off freshly-fetched mom, booted in plan mode.<br>🔵 **Bravo · mom-sprint-hub** — briefed as bb_tools (rebase-only) and pointed at `palette.ts` for the colour token. | 🔵 **Bravo · mom-sprint-hub** — dispatched, at the plan gate; briefed bb_tools rules (rebase-only, theme token not hex).<br>❓ **Bravo · mom-sprint-hub** — is the prior sprint's not-done data already on the wire, or does rollover need backend work? |
+
+**If the 🔵 won't fit in one line, cut — don't add a line.** Setup detail (which base you fetched,
+which file you pointed it at, what rules you briefed) is process; it goes only if he'd act on it.
+
 ### Every line stands alone
 
 Name the **crew and the ticket**, the **actual thing**, and for a ❓ the **actual choice**. A line he
