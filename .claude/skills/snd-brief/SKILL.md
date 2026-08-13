@@ -140,9 +140,19 @@ herdr agent prompt <pane> "$(cat /tmp/brief-KB-XXXXX.md)"
 > `herdr agent send` was **removed** in 0.7.5. It doesn't error — it prints the `agent` usage block and
 > exits `0`, so a brief sent with it is silently never delivered. Same trap as the wait below.
 
-Update the board: add the ticket's row and **give the crew a name** — run `bin/fleet --next-name` and set
-that (the lowest free NATO word) as the row's `name`. It's the captain's handle for this crew member, so
-use it when you report on them. The crew cell goes 🔄 automatically once herdr sees the agent working.
+**d. Name the crew — in the ledger *and* in herdr.** Run `bin/fleet --next-name` for the lowest free NATO
+word, set it as the board row's `name`, and stamp the same word on the herdr agent:
+
+```bash
+herdr agent rename <pane> <name>          # lowercase, e.g. bravo — must match the ledger row
+```
+
+An agent with no name renders as **`claude`** in herdr's sidebar, so a fleet of them is unreadable — the
+captain can't tell which pane is which crew, and that's the one handle he uses to talk about them. The
+board doesn't care (it joins on worktree path), which is exactly why the drift goes unnoticed. Rename at
+dispatch, every time; if you find an unnamed or misnamed agent later, fix it on the spot.
+
+The crew cell goes 🔄 automatically once herdr sees the agent working.
 
 ## 4. Supervise + converse (the back-and-forth)
 

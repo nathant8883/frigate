@@ -307,6 +307,10 @@ whole fleet, which herdr can't know.
   lowest word not already in use among in_flight (`bin/fleet --next-name` prints it); **free it** when the
   item retires so it cycles back into the pool. The name renders as a prefix in the Crew cell (`Bravo 🔄
   working`). Use these names when you talk to the captain about a specific crew member.
+  - **Stamp the name on the herdr agent too** — `herdr agent rename <pane> <name>` (lowercase, matching
+    the ledger row). An unnamed agent shows as **`claude`** in herdr's sidebar, so the captain can't tell
+    the panes apart; the board still looks fine because it joins on worktree path, which is why this
+    drifts silently. Check it on the boot reconcile and rename anything unnamed or mismatched.
 - **SDLC phase track:** the board rolls each granular `stage` up to the **8 canonical phases**
   — **Planning → Building → Housekeeping → Testing → Review → Validation → Merge → Shipped** — and
   renders them as a progress track (`●●●◉○○○○`: ● done · ◉ current · ○ todo) so the captain sees
