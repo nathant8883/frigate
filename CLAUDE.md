@@ -331,6 +331,11 @@ whole fleet, which herdr can't know.
 - **Feedback flag:** when a crew is waiting on the captain (reported `needs-decision`/`blocked`), set its
   `blocked` field — its crew cell renders **🔴 feedback** (overriding live status) and it lists under
   **Needs feedback — captain**. **Clear the field** the moment you unblock it, or the flag goes stale.
+  - **The lists under the grid are glyph lines, same as a report.** *Needs feedback* renders
+    `❓ **Crew · Ticket** — <the ask>` (🔴 instead when herdr shows that crew actually stalled), and
+    *QA bugs* renders `🐞 **Crew · Ticket** — <KEY>: <summary>`, one per line with a blank line between.
+    So write `blocked` as **the ask itself** — no lead-in, no restating the ticket, no branch; the
+    subject and glyph are already there.
   - **`blocked` is a flag, not a notebook — ONE line, and only for a decision only the captain can make.**
     It renders verbatim into **Needs feedback**, so a paragraph there becomes a wall the captain has to
     read to find his own to-do. Not `blocked`: status, CI results, what a crew did, anything already said

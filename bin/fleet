@@ -356,23 +356,47 @@ def render():
     else:
         out += [rule, "_(nothing in flight)_"]
 
+    # The lists under the grid follow the mate's report convention verbatim:
+    # `<glyph> **Crew · Ticket** — <the point>`, one topic per line, blank line between. The
+    # captain reads these cold, so each line has to stand on its own without the grid above it
+    # — and a line he reads here is shaped exactly like the line the mate sends him in chat.
+    # Same glyph set as the manual's Voice section: ❓ he decides · 🔴 he intervenes · 🐞 QA
+    # bounced it back. Branch is deliberately gone (it duplicated the ticket and pushed the
+    # ask past the fold); it still travels on the ledger item.
+    def subject(it):
+        """The bold scan anchor — crew · ticket, or the ticket alone on an unnamed item."""
+        return "**" + " · ".join([p for p in (it.get("name"), it.get("ticket", "—")) if p]) + "**"
+
+    def block(header, lines):
+        """A section: header, then glyph lines separated by a blank line (never bulleted)."""
+        body = []
+        for ln in lines:
+            body += ([""] if body else []) + [ln]
+        return ["", header, ""] + body
+
     blocked = [it for it in led.get("in_flight", []) if it.get("blocked")]
     if blocked:
-        out += ["", "## 🔴 Needs feedback — captain"]
-        out += [f'- **{b.get("ticket", "—")}** ({b.get("branch","")}) — {b["blocked"]}' for b in blocked]
+        lines = []
+        for b in blocked:
+            wt = (b.get("worktree") or "").rstrip("/")
+            # 🔴 when the crew is genuinely stalled in herdr, ❓ when the mate parked a decision
+            # for him — the same split the Voice glyphs make between intervene and decide.
+            stalled = bool(live) and wt in live and live[wt][0] == CREW["blocked"]
+            lines.append(f'{"🔴" if stalled else "❓"} {subject(b)} — {b["blocked"]}')
+        out += block("## Needs feedback — captain", lines)
 
     # QA's outstanding bug subtasks, listed per parent ticket so the captain can see what got
     # bounced back without opening Jira. Separate from "Needs feedback" on purpose: a bug the
     # mate auto-dispatched needs nothing from the captain, it just needs to be visible.
     bugged = [it for it in led.get("in_flight", []) if open_bugs(it)]
     if bugged:
-        out += ["", "## 🐞 QA bugs — open"]
+        lines = []
         for it in bugged:
             for b in open_bugs(it):
                 tag = " · dispatched" if str(b.get("state")) == "dispatched" else ""
-                out.append(f'- **{b.get("key", "—")}** ({it.get("ticket", "—")}'
-                           f'{" / " + it["name"] if it.get("name") else ""}){tag}'
-                           f' — {b.get("summary", "")}')
+                lines.append(f'🐞 {subject(it)} — {b.get("key", "—")}: '
+                             f'{b.get("summary", "")}{tag}')
+        out += block("## 🐞 QA bugs — open", lines)
 
     if done_rows:
         # Same header minus "Status" — a shipped row has no live crew to report.
