@@ -1,33 +1,29 @@
-# Fleet — in-flight work   ·   crew = static (herdr skipped/down)
+# Fleet — in-flight work   ·   crew = live
 
 Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
 
  Crew     Ticket          Summary                                  Project   Phase            Status
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Delta    KB-48310        Supply Selection (TW)                    snd_aio   ●◉○○○○○○ Build   🔴 feedback
-   ↳ In Progress                                                             ↳ volume rule
- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Alpha    KB-48925        Compartment products (TW)                snd_aio   ●●●●◉○○○ Review  🔴 feedback
-   ↳ In Progress                                                             ↳ draft #1581
- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Hotel    KB-49849        Turn ETA / route details                 snd_aio   ●●●●◉○○○ Review  🔴 feedback
    ↳ In Progress                                                             ↳ draft #1562
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Bravo    KB-39382        Freight line item perf                   snd_aio   ●◉○○○○○○ Build   ✗ herdr
-   ↳ In Progress                                                             ↳ cache + E2E tests
+ Delta    KB-48310        Supply Selection (TW)                    snd_aio   ●◉○○○○○○ Build   📜 captain review
+   ↳ In Progress                                                             ↳ gaps 2/6/7
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Charlie  KB-49995        Carrier alloc columns                    snd_aio   ●◉○○○○○○ Build   ✗ herdr
-   ↳ In Progress                                                             ↳ plan ok (captain)
+ Bravo    KB-39382        Freight line item perf                   snd_aio   ●●◉○○○○○ House   🔄 working
+   ↳ In Progress                                                             ↳ eafa18271c
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Charlie  KB-49995        Carrier alloc columns                    snd_aio   ●●◉○○○○○ House   🔄 working
+   ↳ In Progress                                                             ↳ restore cols
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Alpha    KB-48925        Compartment products (TW)                snd_aio   ●●●●◉○○○ Review  🟡 idle
+   ↳ In Progress                                                             ↳ draft #1581
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Echo     KB-49795        Freight txn safety                       snd_aio   ●●●●◉○○○ Review  📜 captain review
    ↳ In Progress                                                             ↳ draft #1555
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ## Needs feedback — captain
-
-❓ **Alpha · KB-48925** — heal-on-append or an explicit rebuild for turns that already exist with zero compartments?
-
-❓ **Delta · KB-48310** — which of the 7 confirmed gaps ride here? Delta's pick-two is findings 1 and 2.
 
 ❓ **Hotel · KB-49849** — cheap R3/R8 swap refuted by execution; state-hoist + R14 on this branch or its own ticket?
 
