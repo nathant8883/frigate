@@ -139,13 +139,13 @@ block until specific text appears in a pane. useful for waiting on servers, buil
 for `--source recent`, matching uses unwrapped recent terminal text, so pane width and soft wrapping do not break matches. `pane read --source recent` still shows the pane as rendered. if you want to inspect the same transcript that the waiter matches, use `pane read --source recent-unwrapped`.
 
 ```bash
-herdr wait output 1-3 --match "ready on port 3000" --timeout 30000
+herdr pane wait-output 1-3 --match "ready on port 3000" --timeout 30000
 ```
 
 with regex:
 
 ```bash
-herdr wait output 1-3 --match "server.*ready" --regex --timeout 30000
+herdr pane wait-output 1-3 --match "server.*ready" --regex --timeout 30000
 ```
 
 if it times out, exit code is `1`.
@@ -155,10 +155,43 @@ if it times out, exit code is `1`.
 block until another agent reaches a specific status:
 
 ```bash
-herdr wait agent-status 1-1 --status done --timeout 60000
+herdr agent wait 1-1 --until done --timeout 60000
 ```
 
-use this when you want the same `done` / `idle` distinction the UI shows.
+use this when you want the same `done` / `idle` distinction the UI shows. `--until` repeats for more than
+one state (`idle`, `working`, `blocked`, `done`, `unknown`); bare `agent wait` matches `idle`, `done`, or
+`blocked`. without `--timeout` it waits indefinitely. on timeout it prints an `{"error":{"code":"timeout"}}`
+object and exits `1`.
+
+**never mask the exit code.** herdr's cli surface moves between releases, and a removed subcommand prints
+usage and exits `0` or `2` — so `herdr … >/dev/null 2>&1; echo done` in a background job reports instant
+success and waits on nothing. let stderr through, check the exit code, and treat a wait that returns in
+milliseconds as broken. sanity check:
+
+```bash
+time herdr agent wait <pane> --until working --timeout 5000   # must take ~5s and exit 1
+```
+
+renamed in 0.7.5 — the old spellings are gone, not deprecated:
+
+| removed | use instead |
+|---|---|
+| `herdr wait agent-status <t> --status X` | `herdr agent wait <t> --until X` |
+| `herdr wait output <t> --match X` | `herdr pane wait-output <t> --match X` |
+| `herdr agent send <t> "text"` | `herdr agent prompt <t> "text"` |
+
+## prompt and wait in one call
+
+`agent prompt` submits by itself — it does **not** need a follow-up `send-keys Enter`. add `--wait` to
+block until the agent settles after submitting:
+
+```bash
+herdr agent prompt 1-1 "run the suite and report" --wait --until done --timeout 900000
+```
+
+caveats from its own help: `--wait` does not track turns, so if the agent is *already* working, that
+in-flight turn's completion may satisfy the wait. and when submission starts from a non-working state it
+first requires an observed state change within 5000ms, else it returns `agent_prompt_stalled`.
 
 ## send text or keys to a pane
 
@@ -233,7 +266,7 @@ herdr pane close 1-3
 ```bash
 NEW_PANE=$(herdr pane split 1-2 --direction right --no-focus | python3 -c 'import sys,json; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')
 herdr pane run "$NEW_PANE" "npm run dev"
-herdr wait output "$NEW_PANE" --match "ready" --timeout 30000
+herdr pane wait-output "$NEW_PANE" --match "ready" --timeout 30000
 herdr pane read "$NEW_PANE" --source recent --lines 20
 ```
 
@@ -242,7 +275,7 @@ herdr pane read "$NEW_PANE" --source recent --lines 20
 ```bash
 herdr pane split 1-2 --direction down --no-focus
 herdr pane run 1-3 "cargo test"
-herdr wait output 1-3 --match "test result" --timeout 60000
+herdr pane wait-output 1-3 --match "test result" --timeout 60000
 herdr pane read 1-3 --source recent --lines 30
 ```
 
@@ -262,7 +295,7 @@ use this pattern when you need to coordinate with a sibling pane:
 herdr pane read 1-3 --source recent --lines 40
 
 # wait only for the next output you expect
-herdr wait output 1-3 --match "ready" --timeout 30000
+herdr pane wait-output 1-3 --match "ready" --timeout 30000
 
 # if you need to inspect the same transcript the waiter matched,
 # read the unwrapped recent text directly
@@ -274,20 +307,20 @@ herdr pane read 1-3 --source recent-unwrapped --lines 40
 ```bash
 herdr pane split 1-2 --direction right --no-focus
 herdr pane run 1-3 "claude"
-herdr wait output 1-3 --match ">" --timeout 15000
+herdr pane wait-output 1-3 --match ">" --timeout 15000
 herdr pane run 1-3 "review the test coverage in src/api/"
 ```
 
 ### coordinate with another agent
 
 ```bash
-herdr wait agent-status 1-1 --status done --timeout 120000
+herdr agent wait 1-1 --until done --timeout 120000
 herdr pane read 1-1 --source recent --lines 100
 ```
 
 ## notes
 
-- `workspace list`, `workspace create`, `tab list`, `tab create`, `tab get`, `tab focus`, `tab rename`, `tab close`, `pane list`, `pane get`, `pane split`, `wait output`, and `wait agent-status` print json on success.
+- `workspace list`, `workspace create`, `tab list`, `tab create`, `tab get`, `tab focus`, `tab rename`, `tab close`, `pane list`, `pane get`, `pane split`, `pane wait-output`, and `agent wait` print json on success.
 - `pane read` prints text, not json.
 - `pane read --format ansi` or `pane read --ansi` returns a rendered ANSI snapshot for TUI feedback loops.
 - `pane read --source recent-unwrapped` is useful when you want to inspect the same unwrapped transcript that `wait output --source recent` matches against.

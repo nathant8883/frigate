@@ -59,6 +59,10 @@ CREW = {
 NO_AGENT = "—"
 HERDR_DOWN = "✗ herdr"
 FEEDBACK = "🔴 feedback"   # ledger `blocked` note set → crew is waiting on captain feedback
+# A draft PR *is* the captain's review — the crew is done and the ball is his. That's a
+# different thing from 🔴 feedback (a question he must answer) and from live crew status,
+# so it gets its own cell rather than reading as "idle" while it waits on him.
+CAPTAIN_REVIEW = "📜 captain review"
 
 
 def trunc(s, n):
@@ -68,7 +72,7 @@ def trunc(s, n):
 
 # status circles render as two terminal cells but len() counts them as one;
 # dwidth/pad keep columns aligned when a crew emoji is present.
-WIDE = set("🔄🟢🔴🟡⚪❔")
+WIDE = set("🔄🟢🔴🟡⚪❔🐞")
 
 
 def dwidth(s):
@@ -168,6 +172,35 @@ def load_ledger():
         return {"in_flight": [], "done": []}
 
 
+# Crew names — NATO phonetic alphabet. Each dispatched crewmate gets the lowest word not
+# currently in use among in_flight items (freed when the item retires), so names stay short
+# and cycle. It's the captain's handle for a crew member — he calls them by name, not ticket #.
+NATO = ["Alpha", "Bravo", "Charlie", "Delta", "Echo", "Foxtrot", "Golf", "Hotel",
+        "India", "Juliet", "Kilo", "Lima", "Mike", "November", "Oscar", "Papa",
+        "Quebec", "Romeo", "Sierra", "Tango", "Uniform", "Victor", "Whiskey",
+        "Xray", "Yankee", "Zulu"]
+
+
+def next_name(led):
+    """Lowest NATO word not in use among in_flight crew ('' if all 26 are taken)."""
+    used = {(it.get("name") or "").strip() for it in led.get("in_flight", [])}
+    return next((n for n in NATO if n not in used), "")
+
+
+def open_bugs(it):
+    """Outstanding QA bug subtasks on an item — the ledger `bugs` field.
+
+    QA files bugs as Jira *bug subtasks* on the story the crew is working; the mate's
+    `snd-qa-bugs` sweep records them here. `state` walks open → dispatched → fixed, so
+    "outstanding" is everything not yet fixed.
+
+    These deliberately do NOT set the row's `blocked` flag — only a bug whose triage was
+    escalated to the captain does that. Auto-flagging every QA filing would light the whole
+    board red and the feedback section would stop meaning anything.
+    """
+    return [b for b in (it.get("bugs") or []) if str(b.get("state", "open")) != "fixed"]
+
+
 def render():
     led = load_ledger()
     live = live_status_by_cwd()
@@ -178,11 +211,25 @@ def render():
     # hangs off the row above. No vertical borders: a glyph-width miscount then just
     # nudges a column instead of cracking a border. Branch dropped from the grid (it
     # mostly duplicates the ticket) — it still shows in the blocked/handoff detail.
-    cols = [("ticket", "Ticket"), ("summary", "Summary"), ("project", "Project"),
-            ("phase", "Phase"), ("crew", "Crew")]
+    cols = [("name", "Crew"), ("ticket", "Ticket"), ("summary", "Summary"), ("project", "Project"),
+            ("phase", "Phase"), ("crew", "Status")]
     GAP, LEAD = 2, " "
+    # Display-time sort (non-destructive — fleet.json keeps its own insertion order):
+    # anything blocked floats to the top — either the ledger `blocked` feedback flag
+    # (needs captain) or a live herdr "blocked" crew — then rows with outstanding QA bugs
+    # (work QA bounced back), then everything else by SDLC phase in pipeline order
+    # (Planning → Shipped); unknown / non-AIO stages sort last. Python's sort is stable, so
+    # insertion order is preserved within a group.
+    def _sort_key(it):
+        wt = (it.get("worktree") or "").rstrip("/")
+        live_blocked = bool(live) and wt in live and live[wt][0] == CREW["blocked"]
+        is_blocked = bool(it.get("blocked")) or live_blocked
+        idx, _ = phase_of(it.get("stage", ""))
+        tier = 0 if is_blocked else (1 if open_bugs(it) else 2)
+        return (tier, idx if idx is not None else len(PHASES))
+
     rows = []   # list of (primary dict, jira status, phase substep)
-    for it in led.get("in_flight", []):
+    for it in sorted(led.get("in_flight", []), key=_sort_key):
         wt = (it.get("worktree") or "").rstrip("/")
         if live is None:
             crew = HERDR_DOWN
@@ -190,20 +237,35 @@ def render():
             crew = live[wt][0]
         else:
             crew = NO_AGENT
+        # A draft PR means the crew has finished and handed it to the captain, so it reads
+        # as captain review rather than as whatever the pane happens to be doing. A real
+        # `blocked` question still wins — an unanswered question outranks a waiting review.
+        if it.get("draft_pr"):
+            crew = CAPTAIN_REVIEW
         if it.get("blocked"):          # mate flagged it → needs captain feedback; overrides live status
             crew = FEEDBACK
         primary = {
             "ticket": it.get("ticket", "—"), "summary": str(it.get("summary", "")),
             "project": it.get("project", ""), "phase": phase_cell(it.get("stage", "")),
-            "crew": crew,
+            "crew": crew, "name": it.get("name", ""),
         }
         jira = it.get("jira", "")
         jira = jira if (jira and jira != "—") else ""
         substep = str(it.get("substep", "")) if it.get("substep") else ""
+        # QA bounced work back → mark the count on the phase's continuation line. The phase
+        # itself stays put (the ticket really *is* at QA's gate); the bug count is what says
+        # it's bouncing. Cheaper than a grid column, which would cost width on every row.
+        n_bugs = len(open_bugs(it))
+        if n_bugs:
+            substep = f"{substep} · 🐞 {n_bugs}" if substep else f"🐞 {n_bugs}"
         rows.append((primary, jira, substep))
 
+    # The crew member's NATO-phonetic name is the FAR-LEFT column (its own "Crew" column) — the
+    # captain's handle for a crew member (he refers to crew by name, not ticket #). Set on the
+    # ledger item at dispatch. The far-right stripe is the live herdr "Status" (working/idle/…).
+    # Unnamed (legacy / non-crew) items leave the name cell blank.
     order = [k for k, _ in cols]
-    left_order = [k for k in order if k != "crew"]     # crew is placed separately, far right
+    left_order = [k for k in order if k != "crew"]     # crew (live status) is placed far right
     CREW_GAP = 2
     TERM = term_width()
     # Data columns size to their content. Summary widens further so the longest Jira line
@@ -211,24 +273,38 @@ def render():
     # — solving phase_start ≥ len(LEAD + "  ↳ " + jira) + 1 for the summary width. Then
     # clamp to [MIN, MAX] and to what the pane can show, so the board grows to fit its
     # content (no truncation) instead of either wrapping or stretching into ragged gaps.
-    widths = {k: max([dwidth(h)] + [dwidth(p.get(k, "")) for p, _, _ in rows])
+    # Recently-done rows share the in-flight grid's geometry so the two tables read as one
+    # board. They carry no live crew status and no continuation line — the captain asked for
+    # "just the table", so the ledger `note` (the full write-up) is deliberately NOT rendered.
+    done_rows = [{"ticket": d.get("ticket", "—"), "summary": str(d.get("summary", "")),
+                  "project": d.get("project", ""), "phase": phase_cell(d.get("stage", "Merged")),
+                  "crew": "", "name": d.get("name", "")}
+                 for d in led.get("done", [])]
+    widths = {k: max([dwidth(h)] + [dwidth(p.get(k, "")) for p, _, _ in rows]
+                     + [dwidth(p.get(k, "")) for p in done_rows])
               for k, h in cols if k != "summary"}
-    summary_content = max([dwidth("Summary")] + [dwidth(p["summary"]) for p, _, _ in rows])
+    summary_content = max([dwidth("Summary")] + [dwidth(p["summary"]) for p, _, _ in rows]
+                          + [dwidth(p["summary"]) for p in done_rows])
     max_jira = max([0] + [dwidth(j) for _, j, _ in rows if j])
     max_substep = max([0] + [dwidth(s) for _, _, s in rows if s])
     jira_need = max_jira + 5 - widths["ticket"] - widths["project"] - 3 * GAP
-    fixed = (dwidth(LEAD) + widths["ticket"] + widths["project"] + widths["phase"]
+    fixed = (dwidth(LEAD) + widths["name"] + widths["ticket"] + widths["project"] + widths["phase"]
              + GAP * (len(left_order) - 1) + CREW_GAP + widths["crew"])
     # Fill: Summary stretches so the board spans the full pane width. Cap it so the crew
     # stripe (right of the phase track) and the substep (tucked under the phase on the
-    # continuation line) still reach the edge without being squeezed off, and floor it at
-    # what the Summary text / longest Jira line need so those never truncate.
+    # continuation line) still reach the edge without being squeezed off.
     fill = min(SUMMARY_MAX,
                TERM - fixed,                                          # room for the crew stripe
-               TERM - dwidth(LEAD) - widths["ticket"] - widths["project"]
-                    - 3 * GAP - dwidth("↳ ") - max_substep)           # room for the substep
-    widths["summary"] = max(SUMMARY_MIN, summary_content, jira_need, fill)
+               TERM - dwidth(LEAD) - widths["name"] - widths["ticket"] - widths["project"]
+                    - 4 * GAP - dwidth("↳ ") - max_substep)           # room for the substep
+    # Summary takes exactly the room the pane has: `fill` is a ceiling, not just a target, so
+    # a long summary or Jira line gets an ellipsis instead of pushing every row (and the rule)
+    # past the pane edge — which wraps the whole board and looks broken. SUMMARY_MIN floors it,
+    # so below ~85 cols the board still overflows; widen the pane rather than shrink the floor.
+    widths["summary"] = max(SUMMARY_MIN, fill)
     for p, _, _ in rows:                   # truncate summaries to the resolved width
+        p["summary"] = trunc(p["summary"], widths["summary"])
+    for p in done_rows:
         p["summary"] = trunc(p["summary"], widths["summary"])
 
     def col_start(target):                 # display offset where a left-block column begins
@@ -285,14 +361,33 @@ def render():
         out += ["", "## 🔴 Needs feedback — captain"]
         out += [f'- **{b.get("ticket", "—")}** ({b.get("branch","")}) — {b["blocked"]}' for b in blocked]
 
-    done = led.get("done", [])
-    if done:
-        out += ["", "## Recently done"]
-        out += [f'- {d.get("ticket", "—")} — {d.get("note", "")}' for d in done]
+    # QA's outstanding bug subtasks, listed per parent ticket so the captain can see what got
+    # bounced back without opening Jira. Separate from "Needs feedback" on purpose: a bug the
+    # mate auto-dispatched needs nothing from the captain, it just needs to be visible.
+    bugged = [it for it in led.get("in_flight", []) if open_bugs(it)]
+    if bugged:
+        out += ["", "## 🐞 QA bugs — open"]
+        for it in bugged:
+            for b in open_bugs(it):
+                tag = " · dispatched" if str(b.get("state")) == "dispatched" else ""
+                out.append(f'- **{b.get("key", "—")}** ({it.get("ticket", "—")}'
+                           f'{" / " + it["name"] if it.get("name") else ""}){tag}'
+                           f' — {b.get("summary", "")}')
+
+    if done_rows:
+        # Same header minus "Status" — a shipped row has no live crew to report.
+        out += ["", "## Recently done",
+                primary_line({k: h for k, h in cols if k != "crew"})]
+        for p in done_rows:
+            out += [rule, primary_line(p)]
+        out.append(rule)
     return "\n".join(out) + "\n"
 
 
 if __name__ == "__main__":
+    if "--next-name" in sys.argv:          # print the next free crew name and exit (for dispatch)
+        print(next_name(load_ledger()))
+        sys.exit(0)
     txt = render()
     sys.stdout.write(txt)
     if "--write" in sys.argv:

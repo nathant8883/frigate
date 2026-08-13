@@ -101,7 +101,7 @@ session (herdr daemon)
 
 - The **mate** (orchestrator) runs at `cwd = frigate`. It keeps one workspace per active project,
   opens a worktree-tab per ticket, starts a crewmate agent in each, and watches them with
-  `herdr agent list` / `herdr wait agent-status <pane> --status done`.
+  `herdr agent list` / `herdr agent wait <pane> --until done`.
 - A **crewmate** runs at `cwd = <worktree>` — a separate git checkout (herdr puts worktrees outside
   the repo). That cwd is the constraint everything below hinges on.
 
@@ -160,6 +160,32 @@ secret. frigate's project-scope enable stays for the mate.
 - **Test coverage:** document in a ticket comment — the gherkin from `snd_tests` (if applicable) + the unit tests added.
 - Jira: `gravitatedxp.atlassian.net`, project `KB`, via the Atlassian MCP.
 
+### QA bugs — the Validation bounce-back
+
+QA files bugs as **bug subtasks on the story** (`issuetype = "Bug subtask"`; `Internal Sub-task` and
+`Test` are the automation-generated noise). Nothing notifies the mate, so the **`snd-qa-bugs`** sweep is
+how they're found — on the 20-min reconcile heartbeat and at boot.
+
+Two status tracks run at once, and the parent one is the one that gates the sprint:
+
+| | Status |
+|---|---|
+| Bug subtask, filed by QA | `Open` |
+| Bug subtask, crew working it | `In Progress` |
+| Bug subtask, fix pushed | `Ready for Testing` — QA re-validates and closes it (the crew doesn't) |
+| Parent story, while any bug is open | `In Progress` |
+| Parent story, once the **last** bug clears | **back to `Ready for Testing`** |
+
+**The parent transition is mandatory.** QA is triggered to re-validate by the *parent's* status, so a
+parent left `In Progress` after its bugs are fixed stalls silently — the fixes sit there untested.
+
+A bug fix lands on the **same branch**, in the **same worktree**, via the crew that already holds it —
+and still gets a **mini housekeeping**: a light code review of the diff, every applicable convention
+enforced, comment pruning, no ticket refs in code, lint clean. Light pass, but the rules aren't optional.
+
+The board keeps the phase at **Validation** throughout (the ticket never left QA's gate) and shows a
+`🐞 N` marker instead of rolling the track backwards.
+
 ## Stage → skill / tool map
 
 | Stage | Skill / tool | Status |
@@ -173,6 +199,7 @@ secret. frigate's project-scope enable stays for the mate.
 | 5 Unit / E2E testing | `uv run pytest`, `snd_tests`, `gravi-burners` | partial, **TBD** |
 | 6 Draft PR | **context** (`gh pr create --draft --base RC` + repo template) | ✅ resolved — snd_aio's `.github/pull_request_template.md` + `CLAUDE.md` § Pull Requests |
 | Jira hygiene (gate, statuses, AC-drift, coverage) | `snd-jira-housekeeping` | ✅ built |
+| QA bug intake (sweep → triage → dispatch → bug + parent statuses) | `snd-qa-bugs` (mate-tier) | ✅ built |
 | Bug fixes on a story | `fixbugs` (→ `snd-fixbugs`) | have |
 | i18n strings | `backend-i18n` (→ `snd-backend-i18n`) | have |
 
