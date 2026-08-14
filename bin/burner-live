@@ -1,0 +1,658 @@
+#!/usr/bin/env python3
+"""burner-live — block until a pushed AIO commit is genuinely live on a burner, then say so once.
+
+Usage:
+  burner-live <burner-id> [--repo <path>] [--sha <ref>] [--timeout 25m]
+                          [--no-trigger] [--no-branch-check] [--once] [--json]
+
+  burner-live tank                     # from a crew worktree: wait until HEAD is live on tank
+  burner-live tank --once              # one snapshot, no waiting
+  burner-live tank --sha 7aeb2fb       # a specific commit
+
+Run it as a BACKGROUND task so its exit re-invokes you, then report one line. Do not hand-roll a
+poll loop around `gh` / `gravi` — the traps are in `bin/burner-live`'s own comments and they bite.
+
+Exit: 0 live · 1 not live (timeout, or --once snapshot) · 2 CI failed · 3 burner/commit unusable.
+
+Why this is not a two-liner — the four things that make the burner loop wrong by default:
+
+  1. CI publishes on PROMOTE, not on build. Images push as `pending-<short_sha>` and are retagged
+     to `:<build_sha>` + the branch tag only after tests pass. A green build job means nothing yet.
+  2. A burner rolls on the BRANCH TAG, via autosync's ≤3-min poll — not on your push.
+  3. Each service's image is keyed on ITS OWN sha: the last commit touching `<service>/` or
+     `shared/` (`.github/actions/check-image`). FRONTEND is the exception (`always_key_off_head`),
+     so it rebuilds every commit. After a frontend-only commit the backend legitimately reports an
+     older sha forever — that is correct, not "not live yet".
+  4. Ground truth is reachable unauthenticated from outside the cluster, and nobody uses it:
+     `/api/version` returns the backend image's baked-in GIT_SHA, and the frontend entry bundle
+     embeds VITE_COMMIT_HASH (`version: "<short_sha>"`, from the Faro init).
+
+So this waits on the registry (mom) for promotion, nudges autosync, then PROVES the running app is
+on the expected sha per service, rather than trusting a workflow badge or a pod age.
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.request
+
+# The 8 services mom builds burner images for, and the workflow that promotes each.
+SERVICES = [
+    "backend", "frontend", "forecast", "ims",
+    "auth", "pricing", "payroll", "inventory_valuation",
+]
+WORKFLOW = {s: f"{s.replace('_', ' ').title()} Workflow" for s in SERVICES}
+WORKFLOW["ims"] = "IMS Workflow"  # not "Ims Workflow"
+
+# Frontend keys its image off HEAD on every commit (check-image always_key_off_head: "true"),
+# so it always rebuilds and always has to roll.
+KEYS_OFF_HEAD = {"frontend"}
+
+BURNER_HOST = "{id}.burner.gravitate.energy"
+BAD_CONCLUSIONS = {"failure", "cancelled", "timed_out", "startup_failure", "action_required"}
+POLL_IMAGE = 20      # seconds between promote checks
+POLL_ROLL = 10       # seconds between roll/proof checks
+HEARTBEAT = 120      # seconds between "still waiting" lines when nothing changed
+
+# mom rate-limits (seen: "Rate limit exceeded. Retry after 60 seconds" after ~30 calls/min), so the
+# mom-backed reads get their own, slower cadence. The proofs that actually decide the verdict hit the
+# burner's own hostname unauthenticated — those are free, so they stay on POLL_ROLL.
+MOM_STATUS_EVERY = 60
+MOM_PODS_EVERY = 30
+RATE_LIMIT_BACKOFF = 60
+
+
+# ---------------------------------------------------------------- process plumbing
+
+def run(cmd, cwd=None, timeout=120):
+    """Run a command, never raise. Returns (rc, stdout, stderr)."""
+    try:
+        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout)
+        return p.returncode, p.stdout, p.stderr
+    except FileNotFoundError:
+        return 127, "", f"{cmd[0]}: not found"
+    except subprocess.TimeoutExpired:
+        return 124, "", f"{' '.join(cmd)}: timed out after {timeout}s"
+
+
+def first_json(text):
+    """Pull the first JSON value out of noisy stdout.
+
+    `gravi` prints an "0.13.9 is out of date" nag ABOVE its --json payload, so json.loads on the
+    whole stream raises. Never parse a CLI's stdout whole — decode from the first brace.
+    """
+    starts = [i for i in (text.find("{"), text.find("[")) if i >= 0]
+    if not starts:
+        return None
+    try:
+        return json.JSONDecoder().raw_decode(text[min(starts):])[0]
+    except ValueError:
+        return None
+
+
+def gravi_json(*args, timeout=90):
+    rc, out, err = run(["gravi", *args, "--json"], timeout=timeout)
+    obj = first_json(out)
+    if obj is None:
+        tail = [l for l in (err + out).strip().splitlines() if l.strip()]
+        return None, (tail[-1] if tail else f"no output (rc={rc})")
+    return obj, None
+
+
+def git(repo, *args):
+    rc, out, err = run(["git", "-C", repo, *args])
+    return (out.strip() if rc == 0 else None)
+
+
+# ---------------------------------------------------------------- mom: registry truth
+
+def gravi_python():
+    """Path to gravi's own interpreter — the only one that can import gravi_cli.
+
+    `build-availability` (the endpoint that says whether an image is PROMOTED, which is the only
+    thing a burner can deploy) has no `gravi` subcommand, so we reach it through the library.
+
+    `which gravi` lands on a pyenv shim whose sibling `python` is ALSO a shim — it exists and it
+    can't import gravi_cli, so path-existence alone silently picks the wrong interpreter. Probe it.
+    """
+    home = os.path.expanduser("~")
+    candidates = []
+    for exe in (os.path.join(home, ".local/bin/gravi"), shutil.which("gravi")):
+        if exe and os.path.exists(exe):
+            candidates.append(os.path.join(os.path.dirname(os.path.realpath(exe)), "python"))
+    candidates.append(os.path.join(home, ".local/share/uv/tools/gravi-cli/bin/python"))
+    for py in candidates:
+        if os.path.exists(py) and run([py, "-c", "import gravi_cli"], timeout=30)[0] == 0:
+            return py
+    return None
+
+
+_MOM_SNIPPET = r"""
+import json, sys
+from gravi_cli.auth import get_mom_token, get_mom_url
+from gravi_cli.client import MomClient
+tok = get_mom_token()
+c = MomClient(get_mom_url())
+out = {}
+for tag in sys.argv[1:]:
+    try:
+        out[tag] = c.check_build_availability(tag, tok)
+    except Exception as e:
+        out[tag] = {"error": "%s: %s" % (type(e).__name__, e)}
+print("__BL__" + json.dumps(out))
+"""
+
+
+def build_availability(py, tags):
+    """({tag: {service: (found, built_at)}}, error) — mapping is None when mom gave us nothing.
+
+    `found` flips true only once the image is promoted, which is exactly the gate a burner cares
+    about. One process for every tag so we pay the auth round-trip once.
+    """
+    if not py:
+        return None, "gravi interpreter not found"
+    if not tags:
+        return None, "no tags to check"
+    rc, out, err = run([py, "-c", _MOM_SNIPPET, *sorted(tags)], timeout=90)
+    line = next((l for l in out.splitlines() if l.startswith("__BL__")), None)
+    if not line:
+        tail = [l for l in (err + out).strip().splitlines() if l.strip()]
+        return None, (tail[-1] if tail else f"no output (rc={rc})")
+    try:
+        raw = json.loads(line[len("__BL__"):])
+    except ValueError:
+        return None, "unparseable response"
+    result, error = {}, None
+    for tag, payload in raw.items():
+        if not isinstance(payload, dict) or "services" not in payload:
+            # auth / rate-limit / unknown tag — "no data", NOT "not promoted"
+            error = error or (payload or {}).get("error", "no services in response")
+            continue
+        result[tag] = {
+            s["service"]: (bool(s.get("found")), s.get("built_at") or "")
+            for s in payload.get("services", [])
+        }
+    return (result or None), error
+
+
+# ---------------------------------------------------------------- HTTP probes
+
+def http_get(url, timeout=25, headers=None, limit=None):
+    req = urllib.request.Request(url, headers={"User-Agent": "burner-live", **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return r.status, (r.read(limit) if limit else r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, b""
+    except Exception:
+        return 0, b""
+
+
+def backend_sha(base):
+    """The backend image's baked-in GIT_SHA, straight from the running pod."""
+    status, body = http_get(f"{base}/api/version", limit=4096)
+    if status != 200:
+        return None
+    try:
+        return (json.loads(body).get("short_sha") or "").strip() or None
+    except ValueError:
+        return None
+
+
+ASSET_RE = re.compile(rb"/assets/index-[A-Za-z0-9_-]+\.js")
+
+
+def frontend_asset(base):
+    """The served entry bundle path — its hash changes with every commit (the sha is baked in)."""
+    status, body = http_get(f"{base}/", limit=65536)
+    if status != 200:
+        return None
+    m = ASSET_RE.search(body)
+    return m.group(0).decode() if m else None
+
+
+def _stream_contains(url, needle, chunk=1 << 20, timeout=90, headers=None):
+    """Search a large body without holding it in memory (the entry bundle is ~13 MB)."""
+    req = urllib.request.Request(url, headers={"User-Agent": "burner-live", **(headers or {})})
+    tail = b""
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            while True:
+                buf = r.read(chunk)
+                if not buf:
+                    return False, r.status
+                if needle in tail + buf:
+                    return True, r.status
+                tail = buf[-len(needle):]
+    except Exception:
+        return False, 0
+
+
+FARO_RE = re.compile(rb'"bb-frontend",\s*version:\s*"([0-9a-f]{7,40})"')
+
+
+def frontend_state(base, asset, want, cache):
+    """(matches, served_sha) for the bundle the burner is actually serving.
+
+    The commit sha rides in the Faro init (`name: "bb-frontend", version: "<short_sha>"`), which
+    lands in the last few KB of the entry chunk — so a tail Range request answers it for 256 KB
+    instead of 13 MB. Cached per asset: an un-rolled pod keeps serving the same file.
+    """
+    key = (asset, want)
+    if key in cache:
+        return cache[key]
+    url = f"{base}{asset}"
+    status, tail = http_get(url, timeout=60, headers={"Range": "bytes=-262144"})
+    served = None
+    if status in (200, 206):
+        m = FARO_RE.search(tail)
+        if m:
+            served = m.group(1).decode()[:7]
+    if served is not None:
+        out = (served == want[:7], served)
+    else:
+        # Faro init wasn't in the tail — fall back to a positive containment check over the
+        # whole chunk (streamed, never held in memory). Can prove a match, can't name a miss.
+        found, _ = _stream_contains(url, want.encode())
+        out = (found, want if found else None)
+    cache[key] = out
+    return out
+
+
+# ---------------------------------------------------------------- git: expected sha per service
+
+def expected_shas(repo, sha):
+    """Replicate .github/actions/check-image: which sha each service's image is keyed on."""
+    head_short = sha[:7]
+    out = {}
+    for svc in SERVICES:
+        if svc in KEYS_OFF_HEAD:
+            out[svc] = head_short
+            continue
+        last = git(repo, "log", "-n", "1", "--format=%H", sha, "--", f"{svc}/", "shared/")
+        out[svc] = (last or sha)[:7]
+    return out
+
+
+def remote_branches(repo, sha):
+    raw = git(repo, "branch", "-r", "--contains", sha) or ""
+    return [b.strip() for b in raw.splitlines() if b.strip() and "->" not in b]
+
+
+# ---------------------------------------------------------------- CI (fail-fast only)
+
+def ci_runs(repo, sha):
+    rc, out, err = run(
+        ["gh", "run", "list", "--commit", sha, "--limit", "40",
+         "--json", "name,status,conclusion,url"],
+        cwd=repo, timeout=90,
+    )
+    runs = first_json(out)
+    return runs if isinstance(runs, list) else None
+
+
+def ci_failures(runs, services):
+    """Failed runs that gate one of `services`.
+
+    A run is only green when `conclusion == "success"`. An EMPTY conclusion means still running —
+    reading it as green is the classic false-green (and `gh pr checks --json` doesn't exist on
+    gh 2.45.0: it prints usage and exits 0, so watch loops built on it spin forever).
+    """
+    wanted = {WORKFLOW[s] for s in services}
+    return [
+        r for r in (runs or [])
+        if r.get("name") in wanted and (r.get("conclusion") or "").lower() in BAD_CONCLUSIONS
+    ]
+
+
+# ---------------------------------------------------------------- pods
+
+def service_deployments(pods, svc):
+    dash, under = svc.replace("_", "-"), svc.replace("-", "_")
+    hits = []
+    for d in pods.get("deployments", []):
+        name = d.get("name", "")
+        if name in (dash, under) or name.startswith(dash + "-") or name.startswith(under + "-"):
+            hits.append(d)
+    return hits
+
+
+def not_ready(deps):
+    return [d["name"] for d in deps
+            if (d.get("ready_replicas") or 0) < (d.get("desired_replicas") or 0)]
+
+
+def newest_restart(deps):
+    stamps = [p.get("last_restart_time") for d in deps for p in d.get("pods", [])
+              if p.get("last_restart_time")]
+    return max(stamps) if stamps else None
+
+
+# ---------------------------------------------------------------- formatting
+
+def human(seconds):
+    seconds = int(seconds)
+    return f"{seconds // 60}m{seconds % 60:02d}s" if seconds >= 60 else f"{seconds}s"
+
+
+def parse_duration(text):
+    m = re.fullmatch(r"(\d+)\s*([smh]?)", text.strip().lower())
+    if not m:
+        raise argparse.ArgumentTypeError(f"bad duration: {text} (try 25m, 90s, 1h)")
+    return int(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600}[m.group(2)]
+
+
+# ---------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(
+        prog="burner-live", add_help=True,
+        description="Wait until a pushed commit is actually live on a burner.")
+    ap.add_argument("burner", help="burner id, e.g. tank")
+    ap.add_argument("--repo", default=".", help="repo/worktree holding the commit (default: cwd)")
+    ap.add_argument("--sha", default="HEAD", help="commit to wait for (default: HEAD)")
+    ap.add_argument("--timeout", type=parse_duration, default=parse_duration("25m"))
+    ap.add_argument("--no-trigger", action="store_true",
+                    help="don't nudge autosync; just watch its own ≤3-min poll")
+    ap.add_argument("--no-branch-check", action="store_true",
+                    help="don't refuse when the burner was built off another branch")
+    ap.add_argument("--once", action="store_true", help="single snapshot, no waiting, no trigger")
+    ap.add_argument("--json", dest="as_json", action="store_true")
+    args = ap.parse_args()
+
+    started = time.time()
+    lines = []          # progress, echoed live unless --json
+    seen = {}           # change-detection for progress lines
+    last_beat = [started]
+
+    def log(msg):
+        stamp = f"[{human(time.time() - started):>6}] {msg}"
+        lines.append(stamp)
+        if not args.as_json:
+            print(stamp, flush=True)
+
+    def once(key, msg):
+        """Log only when this fact changes — background output should be readable, not a firehose."""
+        if seen.get(key) != msg:
+            seen[key] = msg
+            log(msg)
+
+    def beat(msg):
+        if time.time() - last_beat[0] >= HEARTBEAT:
+            last_beat[0] = time.time()
+            log(msg)
+
+    def finish(code, verdict, detail=None, **extra):
+        payload = {
+            "verdict": verdict, "exit": code, "burner": args.burner,
+            "elapsed_seconds": round(time.time() - started, 1),
+            "elapsed": human(time.time() - started), **extra,
+        }
+        if args.as_json:
+            payload["log"] = lines
+            print(json.dumps(payload, indent=2), flush=True)
+        else:
+            print(f"\n{verdict}  {args.burner}  {human(time.time() - started)}", flush=True)
+            for d in (detail or []):
+                print(f"  {d}", flush=True)
+        return code
+
+    # ---- stage 0: the target ------------------------------------------------
+    repo = os.path.abspath(args.repo)
+    full = git(repo, "rev-parse", args.sha)
+    if not full:
+        return finish(3, "ERROR", [f"{repo} is not a git repo, or {args.sha} is not a commit"])
+    short = full[:7]
+
+    # The per-service sha rules, /api/version and the 8-service list are all AIO's — pointing this
+    # at another repo would produce confident nonsense.
+    if "supply_and_dispatch_aio" not in (git(repo, "remote", "-v") or ""):
+        return finish(3, "ERROR",
+                      [f"{repo} is not the supply_and_dispatch_aio repo",
+                       "burner-live models AIO's image rules; other projects need their own"])
+
+    branches = remote_branches(repo, full)
+    if not branches:
+        return finish(3, "NOT-PUSHED",
+                      [f"{short} is on no remote branch — push it first (a burner deploys a pushed"
+                       " image, never your working tree)"], sha=short)
+    # The remote is NOT always called `origin` (AIO's is `supply_and_dispatch_aio`).
+    branch = branches[0].split("/", 1)[1] if "/" in branches[0] else branches[0]
+    tag_branch = branch.replace("/", "-")
+    log(f"target {short} on {branch} → burner {args.burner}")
+
+    expected = expected_shas(repo, full)
+    must_roll = [s for s in SERVICES if expected[s] == short]
+    log("rebuilt by this commit: " + (", ".join(must_roll) or "nothing") +
+        "  |  keyed on an earlier commit: " +
+        ", ".join(f"{s}@{expected[s]}" for s in SERVICES if s not in must_roll))
+
+    py = gravi_python()
+    if not py:
+        log("! gravi's interpreter not found — falling back to CI + live-app proof only")
+
+    base = "https://" + BURNER_HOST.format(id=args.burner)
+    asset_cache = {}
+    triggered = False
+    st = None                        # last good burner status
+    pods, perr = None, None          # last good pods snapshot
+    built_at = {}
+    promoted = not must_roll         # nothing to wait on when the commit rebuilt nothing
+    needs_pods = any(s not in ("backend", "frontend") for s in must_roll)
+    next_status = next_avail = next_pods = 0.0
+    next_ci = [0.0]                  # gh is slow; don't re-ask it every 10s
+    mom_hold = [0.0]                 # rate-limit backoff deadline
+
+    def hold(where, err):
+        """mom rate-limits (~30 reads/min). Pause its reads; the burner's own probes carry on."""
+        m = re.search(r"[Rr]etry after (\d+)", err or "")
+        wait = int(m.group(1)) if m else RATE_LIMIT_BACKOFF
+        mom_hold[0] = time.time() + wait
+        once("ratelimit", f"! mom rate-limited on {where} — pausing its reads for {wait}s")
+
+    def limited(err):
+        return "rate limit" in (err or "").lower()
+
+    while True:
+        now = time.time()
+        elapsed = now - started
+        timed_out = elapsed > args.timeout
+        mom_ok = now >= mom_hold[0]
+
+        # ---- the burner itself (mom-paced) ---------------------------------
+        if mom_ok and now >= next_status:
+            fresh, err = gravi_json("burner", "status", args.burner)
+            if fresh is not None:
+                st, next_status = fresh, now + MOM_STATUS_EVERY
+            elif limited(err):
+                hold("burner status", err)
+            elif st is None:
+                return finish(3, "ERROR", [f"gravi burner status {args.burner} failed: {err}",
+                                           "if it's an auth error: gravi login"])
+            else:
+                next_status = now + MOM_STATUS_EVERY  # transient; keep the last snapshot
+        if st is None:
+            if args.once or timed_out:
+                return finish(3, "ERROR", ["no burner status from mom yet (rate-limited?)"])
+            time.sleep(POLL_ROLL)
+            continue
+
+        state = (st.get("status") or "unknown").lower()
+        if state in ("deleted", "deleting", "failed", "expired"):
+            return finish(3, "BURNER-GONE",
+                          [f"burner {args.burner} is {state} — start a fresh one"
+                           f" (gravi burner start --build {tag_branch})"], burner_status=state)
+        if state != "ready":
+            once("burner", f"burner {args.burner} is {state} — waiting for ready")
+            if args.once or timed_out:
+                return finish(1, "NOT-READY", [f"burner is {state}"], burner_status=state)
+            next_status = min(next_status, time.time() + 15)  # a creating burner changes fast
+            time.sleep(POLL_ROLL)
+            continue
+
+        # A burner pinned to a sha, or built off another branch, will NEVER pick this commit up:
+        # autosync only follows the branch tag it was created with.
+        built_off = st.get("build") or ""
+        if not args.no_branch_check and built_off:
+            pinned = re.fullmatch(r"[0-9a-f]{7,40}", built_off)
+            if pinned and not full.startswith(built_off):
+                return finish(3, "BURNER-PINNED",
+                              [f"burner is pinned to build {built_off}, not a branch — it can never"
+                               f" roll onto {short}",
+                               f"start a fresh one: gravi burner start --build {tag_branch}"])
+            if not pinned and built_off.replace("/", "-") != tag_branch:
+                return finish(3, "WRONG-BRANCH",
+                              [f"burner was built off '{built_off}' but {short} is on"
+                               f" '{branch}' — its branch tag will never move onto your commit",
+                               f"start a fresh one: gravi burner start --build {tag_branch}",
+                               "or pass --no-branch-check if you know better"])
+
+        # ---- stage 1: promoted images (mom-paced; promotion is monotonic) ---
+        pending = []
+        if not promoted:
+            if mom_ok and now >= next_avail:
+                avail, aerr = build_availability(py, {expected[s] for s in must_roll})
+                next_avail = now + POLL_IMAGE
+                if limited(aerr):
+                    hold("build-availability", aerr)
+                    pending = list(must_roll)
+                elif avail:
+                    for svc in must_roll:
+                        found, when = avail.get(expected[svc], {}).get(svc, (False, ""))
+                        built_at[svc] = when
+                        if not found:
+                            pending.append(svc)
+                    if not pending:
+                        promoted = True
+                        once("promoted", "all images promoted: " +
+                             ", ".join(f"{s}@{expected[s]}" for s in must_roll))
+                else:
+                    # No registry view — fall back to the workflow that does the promoting. Weaker
+                    # (a green workflow isn't proof the tag moved) but keeps fail-fast + progress.
+                    once("nomom", f"! mom's build-availability unreachable ({aerr or 'no data'})"
+                                  " — gating on CI instead")
+                    runs = ci_runs(repo, full)
+                    pending = [s for s in must_roll
+                               if any(r.get("name") == WORKFLOW[s]
+                                      and (r.get("conclusion") or "").lower() != "success"
+                                      for r in (runs or []))]
+                    if not pending:
+                        promoted = True
+            else:
+                # between polls (or mom is paused) — nothing new to learn, so don't proceed as if
+                # the image had landed: an untriggered roll can't have happened yet.
+                pending = list(must_roll)
+        if pending:
+            if now >= next_ci[0]:
+                next_ci[0] = now + POLL_IMAGE
+                bad = ci_failures(ci_runs(repo, full), pending)
+                if bad:
+                    return finish(2, "CI-FAILED",
+                                  [f"{b['name']} → {b.get('conclusion')}  {b.get('url')}"
+                                   for b in bad],
+                                  failed=[b.get("name") for b in bad])
+            once("pending", "waiting on promote: " + ", ".join(pending) +
+                 " (images publish as pending-<sha> and only promote after tests pass)")
+            beat("still waiting on promote: " + ", ".join(pending))
+            if args.once or timed_out:
+                detail = [f"{s}: image for {expected[s]} not promoted yet" for s in pending]
+                if timed_out and not args.once:
+                    detail.append(f"gave up after {human(elapsed)}")
+                return finish(1, "TIMEOUT" if timed_out and not args.once else "NOT-LIVE",
+                              detail, pending=pending)
+            time.sleep(POLL_ROLL)
+            continue
+
+        # ---- stage 2: make the burner roll ---------------------------------
+        if not triggered and not args.no_trigger and not args.once and must_roll:
+            asy, _ = gravi_json("burner", "autosync", "status", args.burner)
+            if asy is not None and not asy.get("enabled"):
+                log("autosync is disabled — triggering one sync so the new image rolls")
+            rc, out, err = run(["gravi", "burner", "autosync", "trigger", args.burner], timeout=120)
+            triggered = True
+            log("autosync triggered" if rc == 0 else f"! autosync trigger failed: {(err or out).strip()[:200]}")
+
+        # ---- stage 3: prove the running app is on the expected sha ---------
+        if mom_ok and now >= next_pods:
+            fresh, perr = gravi_json("burner", "pods", args.burner)
+            if fresh is not None:
+                pods, next_pods = fresh, now + MOM_PODS_EVERY
+            elif limited(perr):
+                hold("pods", perr)
+            else:
+                next_pods = now + MOM_PODS_EVERY
+
+        waiting, proof, caveats = [], [], []
+
+        if pods is None:
+            # Only a blocker when pod state is the *only* evidence available for a rolled service.
+            msg = f"pod state unread ({perr or 'mom paused'})"
+            (waiting if needs_pods else caveats).append(msg)
+        else:
+            for svc in SERVICES:
+                deps = service_deployments(pods, svc)
+                if not deps:
+                    continue  # not deployed on this burner (e.g. inventory_valuation)
+                stale = not_ready(deps)
+                if stale:
+                    waiting.append(f"{svc}: pods not ready ({', '.join(stale)})")
+                elif svc in must_roll and svc not in ("backend", "frontend"):
+                    # No external route to these — a restart after the image was promoted is the
+                    # best available evidence.
+                    rolled = newest_restart(deps)
+                    when = built_at.get(svc) or ""
+                    if when and rolled and rolled < when:
+                        waiting.append(f"{svc}: pods predate the new image ({rolled} < {when})")
+                    else:
+                        proof.append(f"{svc:<20} {expected[svc]}  rolled {rolled or '?'}")
+
+        running = backend_sha(base)
+        if running is None:
+            waiting.append("backend /api/version unreachable")
+        elif running != expected["backend"]:
+            waiting.append(f"backend serving {running}, want {expected['backend']}")
+        else:
+            note = "rolled" if "backend" in must_roll else "unchanged — commit didn't touch backend/ or shared/"
+            proof.append(f"{'backend':<20} {running}  {note}")
+
+        asset = frontend_asset(base)
+        if not asset:
+            waiting.append("frontend index unreachable")
+        else:
+            ok, served = frontend_state(base, asset, expected["frontend"], asset_cache)
+            if ok:
+                proof.append(f"{'frontend':<20} {expected['frontend']}  bundle {asset.split('/')[-1]}")
+            elif served:
+                waiting.append(f"frontend serving {served}, want {expected['frontend']}")
+            else:
+                waiting.append(f"frontend bundle {asset.split('/')[-1]} isn't {expected['frontend']}")
+
+        if not waiting:
+            detail = sorted(proof) + [f"! {c}" for c in caveats]
+            if "frontend" in must_roll:
+                detail.append("hard-refresh the browser (Ctrl/Cmd-Shift-R) to pick up the new bundle")
+            detail.append(base)
+            return finish(0, "LIVE", detail, sha=short, branch=branch, expected=expected,
+                          url=base, proof=sorted(proof), caveats=caveats)
+
+        once("waiting", "rolling: " + "; ".join(waiting))
+        beat("still rolling: " + "; ".join(waiting))
+        if args.once:
+            return finish(1, "NOT-LIVE", waiting, sha=short, waiting=waiting, url=base)
+        if timed_out:
+            return finish(1, "TIMEOUT",
+                          waiting + [f"gave up after {human(elapsed)}"],
+                          sha=short, waiting=waiting, url=base)
+        time.sleep(POLL_ROLL)
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

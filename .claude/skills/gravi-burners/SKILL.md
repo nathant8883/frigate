@@ -5,7 +5,10 @@ description: >-
   for the supply_and_dispatch_aio monorepo. Use this whenever the user wants to spin up / start /
   refresh / sync / recreate / restart / delete a burner, deploy a branch or PR to a burner so they
   (or you) can test a change in a real running app, grab a burner's URL or DB connection, or
-  troubleshoot a burner that won't start, is stale, or expired. Triggers on "burner", "gravi",
+  troubleshoot a burner that won't start, is stale, or expired. Also covers **waiting for a push to
+  go live on a burner** — "is it live yet", "let me know when it's live", "did my fix land on the
+  burner", "why is the burner still showing the old code" (use `burner-live`, never a hand-rolled
+  watch loop). Triggers on "burner", "gravi",
   "spin up a test env", "put this on a burner", "deploy the branch to test", "ephemeral
   environment", or any `{id}.burner.gravitate.energy` URL — even when the exact command isn't named.
 ---
@@ -120,6 +123,44 @@ You pushed a fix and the new image is green. How you get it onto an existing bur
 Rule of thumb: **code/UI change → `autosync trigger` (the default); index/migration/seed change in
 `deployment_main` → `recreate` (or a fresh `start`); stuck pod → `restart`.**
 
+## Wait until it's live — `burner-live` (don't hand-roll this)
+
+`autosync trigger` returns instantly; it does **not** mean the app is serving your code. Use the
+fleet's watcher — on PATH from any cwd (absolute: `/home/nturner/frigate/bin/burner-live`):
+
+```bash
+burner-live tank                 # from your worktree: wait until HEAD is live on tank
+burner-live tank --once          # one snapshot, no waiting, no autosync trigger
+burner-live tank --sha 7aeb2fb   # a specific commit
+```
+
+It waits for the image to **promote**, nudges autosync, then **proves** the running app is on the
+expected sha per service (`/api/version` for backend; the commit sha baked into the served frontend
+bundle). Exit `0` live · `1` not live / timeout · `2` CI failed · `3` burner or commit unusable — and
+it names the actual blocker (`frontend serving 6021ee3, want 7aeb2fb`, `burner was built off
+'KB-39382…'`, `<sha> is on no remote branch`).
+
+**Run it as a background task** so its exit re-invokes you, then report **one** line
+(✅ **Crew · KB-XXXXX** — live on tank, frontend 7aeb2fb; hard-refresh to pick up the bundle).
+Don't sit in the foreground polling, and don't announce "waiting for the burner" — the captain wants
+one message, when it's actually live.
+
+**Three things that make naive burner-watching wrong**, all handled by the script — know them anyway:
+
+- **CI publishes on *promote*, not on build.** Images push as `pending-<short_sha>` and only get the
+  `:<build_sha>` + branch tags after tests pass. A green *build* job means nothing to a burner.
+- **Each service's image is keyed on its own sha** — the last commit touching `<service>/` or
+  `shared/` — **except frontend**, which rebuilds every commit. So after a frontend-only push,
+  `/api/version` reporting an *older* backend sha is **correct**, not "not live yet". Never wait for
+  backend to match HEAD unless HEAD touched `backend/` or `shared/`.
+- **A burner rolls on the branch tag, via autosync's ≤3-min poll.** One started off a *sha* or a
+  different branch will never pick your commit up — no amount of waiting fixes it; start a fresh one.
+
+**Two traps that make a hand-rolled watch loop lie** (both cost a crew real time already):
+`gh pr checks --json` doesn't exist on this box's gh 2.45.0 — it prints usage and **exits 0**, so the
+loop spins forever; and in `gh pr view --json statusCheckRollup`, a *running* check has an **empty
+`conclusion`**, so `.conclusion // .status` reads as green.
+
 ## Operational gotchas
 
 - **Data is on the shared dev Atlas cluster.** `gravi config <id>` returns `conn_str` + `dbs`; the
@@ -143,16 +184,17 @@ Rule of thumb: **code/UI change → `autosync trigger` (the default); index/migr
 # 1. ship the fix
 git add -A && git commit -m "KB-XXXXX: ..." && git push
 
-# 2. wait for the image to build green
+# 2. only if you're about to `start` a NEW burner — it can only deploy a green build
 gh run list --branch KB-XXXXX --limit 6
 gh run watch <backend-run-id> --exit-status; gh run watch <frontend-run-id> --exit-status
+#    (refreshing an EXISTING burner? skip this — burner-live in 3b waits for the promote itself)
 
 # 3a. first time: stand up a burner
 gravi burner start --build KB-XXXXX --ttl 8 --dataset default --sync
 #    -> https://<id>.burner.gravitate.energy
 
 # 3b. already have a burner, frontend/backend code change only:
-gravi burner autosync trigger <id>            # in-place, data kept
+burner-live <id>                               # triggers autosync, waits, proves it's serving your sha
 
 # 3c. change was in deployment_main (index/migration/seed):
 gravi burner recreate <id>                     # full redeploy + re-seed (or `start` a fresh one)

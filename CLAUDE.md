@@ -182,6 +182,7 @@ Two different things the fleet does, don't conflate them:
 |---|---|
 | **Reach a database** | configured envs (dev/test/prod clients) → **BBDClient** (`bbdclient` skill), invoked from anywhere via `uv run --directory projects/bestbuy_tools python …` → `BBDClient.from_config("<dev>")` / `from_mom("<client>")` → `client.db.<database>.<collection>`. **Burner / instance DBs** → the **`gravi`** CLI (fetches the conn / queries directly, no tunnel). Raw connection string → the mongodb MCP. Creds in `bestbuy_tools/.env`. |
 | **Burners** (spin / sync / logs) | the **`gravi`** CLI (`gravi burner …`) — works from any cwd |
+| **"Is my push live on the burner yet?"** | **`burner-live <id>`** (`bin/burner-live`, symlinked onto PATH) — waits for the image to promote, nudges autosync, then *proves* the app is serving your sha; exit 0 live / 1 not / 2 CI failed / 3 unusable. Run it **backgrounded** so its exit re-invokes you. Details in the `gravi-burners` skill |
 | **Jira / Sentry / Grafana** | the Atlassian / Sentry / Grafana **MCPs** — ambient to any agent |
 
 **Burner default — skip the forecast (currently NOT operator-reachable).** Ideally, when spinning a fleet
@@ -196,13 +197,25 @@ forecast**; budget the extra couple minutes. **TODO (real gap): expose a `--skip
 passthrough on `gravi burner start`** (the mom `/burners/*` endpoint already supports `no_actors`; it just
 isn't surfaced on the CLI). Until then, don't chase the removed bb_tools CLI — just accept the forecast.
 
+**Burner liveness — one message, when it's actually live.** The fix → push → burner loop is the fleet's
+most-repeated cycle and the one that gets babysat worst: `autosync trigger` returns instantly, CI's green
+*build* job doesn't mean the image is promoted, and after a frontend-only push the backend's sha
+legitimately stays older. So don't eyeball it and don't narrate it — arm **`burner-live <id>` as a
+background task** (from the crew's worktree, or `--repo <worktree>`) and let its exit re-invoke you, then
+report **one** line: ✅ live (+ hard-refresh if the frontend rolled), 🔴 with the blocker it named. Never
+report "waiting for the burner"; that's the noise the captain asked to stop. Same for a crew — brief it to
+use `burner-live`, not a hand-rolled watch loop.
+
 DB gotchas (all sources): databases are named `environment_service` (default the `_backend` one, e.g.
 `dev_backend`); orders = `order_v2`; embedded IDs may be `ObjectId` **or** `str` — check the collection
 schema before querying by id.
 
-**How crewmates carry it:** capability skills live in **global scope** (`~/.claude/skills`) so every
-crewmate loads them regardless of cwd — **`data-access`** (the router above), plus **`gravi-cli`** /
-**`gravi-burners`** (symlinked from frigate, so they stay version-controlled here). The authoritative
+**How crewmates carry it:** capability skills are meant to sit in **global scope** (`~/.claude/skills`) so
+every crewmate loads them regardless of cwd — **`data-access`** (the router above), plus **`gravi-cli`** /
+**`gravi-burners`** (symlinked from frigate, so they stay version-controlled here). **On this box that
+directory does not exist**, so nothing global reaches a crew: until it's stood up, `snd-brief` symlinks
+`gravi-cli` + `gravi-burners` into each worktree at dispatch, and a crew that was booted before that
+change has neither — check `ls <worktree>/.claude/skills` rather than assuming. The authoritative
 `bbdclient` API skill stays team-tracked in bb_tools; `data-access` points at it. This is the
 **opposite** of project skills (which stay local to their repo) — capability skills are cross-cutting,
 so global is correct. (The `bb_tools/mcp/bbd_client_server.py` MCP is a **defunct prototype** — don't

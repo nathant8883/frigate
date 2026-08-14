@@ -59,9 +59,19 @@ for d in <repo>/.claude/skills/*/; do name=$(basename "$d")
   ln -sfn "$d" "<worktree>/.claude/skills/$name"; done
 ```
 
+**Also provision the capability skills the crew can't otherwise see.** `gravi-burners` / `gravi-cli`
+live in **frigate**, and a crewmate at `cwd=<worktree>` loads neither (`~/.claude/skills/` doesn't
+exist on this box, whatever `CLAUDE.md` implies). Left out, a crew improvises the burner loop from
+memory — which is exactly how "is it live yet?" turns into a 20-minute guessing game:
+
+```bash
+for name in gravi-burners gravi-cli; do
+  ln -sfn "/home/nturner/frigate/.claude/skills/$name" "<worktree>/.claude/skills/$name"; done
+```
+
 Verify `ls <worktree>/.claude/skills` shows the pipeline: `snd-sdlc`, `snd-kickoff`, `snd-housekeeping`,
-`snd-testing`, `snd-pr`, `snd-jira`, `snd-merge-check`. (Once the bundle is graduated to the team repo,
-this whole step is unnecessary — the skills are in the checkout.)
+`snd-testing`, `snd-pr`, `snd-jira`, `snd-merge-check` — plus `gravi-burners`, `gravi-cli`. (Once the
+bundle is graduated to the team repo, the first loop is unnecessary — those skills are in the checkout.)
 
 ## 2. Compose the brief (thin — the SDLC lives in the repo)
 
