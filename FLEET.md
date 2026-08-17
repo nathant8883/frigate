@@ -16,9 +16,6 @@ Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
  Hotel    KB-49849          Turn ETA / route details               snd_aio  ●●●●◉○○○ Review  📜 captain review
    ↳ In Progress                                                            ↳ vent · staged
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Bravo    KB-39382          Freight line item perf                 snd_aio  ●●●●◉○○○ Review  🟡 idle
-   ↳ Ready for Review                                                       ↳ #1596 · out of draft
- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Charlie  KB-49995          Carrier alloc columns                  snd_aio  ●●●●◉○○○ Review  📜 captain review
    ↳ In Progress                                                            ↳ rig · ready
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
