@@ -4,11 +4,14 @@ Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
 
  Crew     Ticket            Summary                                Project  Phase            Status
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Foxtrot  KB-48819          Auto load volumes on assign (TW)       snd_aio  ●◉○○○○○○ Build   🔄 working
-   ↳ In Progress                                                            ↳ cache dep + seeder
+ Foxtrot  KB-48819          Auto load volumes on assign (TW)       snd_aio  ●●●◉○○○○ Test    🔴 feedback
+   ↳ In Progress                                                            ↳ shift leak blocks green
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Alpha    KB-48925          Compartment products (TW)              snd_aio  ●●●●◉○○○ Review  🟡 idle
-   ↳ In Progress                                                            ↳ draft #1581 · 59 green
+ Alpha    KB-48925          Compartment products (TW)              snd_aio  ●●●●◉○○○ Review  🔴 feedback
+   ↳ Ready for Review                                                       ↳ #1581 · RC merge
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Delta    KB-48310          Supply Selection (TW)                  snd_aio  ●●●●●●●◉ Ship    🔴 feedback
+   ↳ Done                                                                   ↳ #1531 merged
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Echo     KB-49795          Freight txn safety                     snd_aio  ●●●●◉○○○ Review  📜 captain review
    ↳ In Progress                                                            ↳ draft #1555
@@ -22,9 +25,17 @@ Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
  Charlie  KB-49995          Carrier alloc columns                  snd_aio  ●●●●◉○○○ Review  📜 captain review
    ↳ In Progress                                                            ↳ rig · ready
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Delta    KB-48310          Supply Selection (TW)                  snd_aio  ●●●●●●◉○ Merge   🟡 idle
-   ↳ Ready For Testing                                                      ↳ #1531 · hold
- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Golf     fleet-board-wrap  Board text wrapping                    frigate  ●●●●●●●◉ Ship    🟡 idle
                                                                             ↳ committed
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+## Needs feedback — captain
+
+❓ **Alpha · KB-48925** — pre-trip writes equipment numbers without ids — leave Alpha's read-time fallback as
+   the fix, or also capture ids at the source?
+
+❓ **Delta · KB-48310** — KB-48310 is merged and Done — tear Delta down, or keep its pane for the parked
+   split-load demo?
+
+❓ **Foxtrot · KB-48819** — E2E repeatability needs shared-suite surgery (seed_shift leaks all 8 shifts per
+   run) — spend a third cycle, or stop with both approved fixes and write it up?
