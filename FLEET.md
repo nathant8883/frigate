@@ -2,26 +2,29 @@
 
 Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
 
- Crew     Ticket    Summary                                         Project  Phase            Status
+ Crew     Ticket            Summary                                Project  Phase            Status
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Foxtrot  KB-48819  Auto load volumes on assign (TW)                snd_aio  ●●●◉○○○○ Test    🔄 working
-   ↳ In Progress                                                             ↳ seeder fix
+ Foxtrot  KB-48819          Auto load volumes on assign (TW)       snd_aio  ●◉○○○○○○ Build   🔄 working
+   ↳ In Progress                                                            ↳ cache dep + seeder
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Alpha    KB-48925  Compartment products (TW)                       snd_aio  ●●●●◉○○○ Review  🟡 idle
-   ↳ In Progress                                                             ↳ draft #1581 · 59 green
+ Alpha    KB-48925          Compartment products (TW)              snd_aio  ●●●●◉○○○ Review  🟡 idle
+   ↳ In Progress                                                            ↳ draft #1581 · 59 green
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Echo     KB-49795  Freight txn safety                              snd_aio  ●●●●◉○○○ Review  📜 captain review
-   ↳ In Progress                                                             ↳ draft #1555
+ Echo     KB-49795          Freight txn safety                     snd_aio  ●●●●◉○○○ Review  📜 captain review
+   ↳ In Progress                                                            ↳ draft #1555
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Hotel    KB-49849  Turn ETA / route details                        snd_aio  ●●●●◉○○○ Review  📜 captain review
-   ↳ In Progress                                                             ↳ vent · staged
+ Hotel    KB-49849          Turn ETA / route details               snd_aio  ●●●●◉○○○ Review  📜 captain review
+   ↳ In Progress                                                            ↳ vent · staged
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Bravo    KB-39382  Freight line item perf                          snd_aio  ●●●●◉○○○ Review  🟡 idle
-   ↳ Ready for Review                                                        ↳ #1596 · out of draft
+ Bravo    KB-39382          Freight line item perf                 snd_aio  ●●●●◉○○○ Review  🟡 idle
+   ↳ Ready for Review                                                       ↳ #1596 · out of draft
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Charlie  KB-49995  Carrier alloc columns                           snd_aio  ●●●●◉○○○ Review  📜 captain review
-   ↳ In Progress                                                             ↳ draft #1595
+ Charlie  KB-49995          Carrier alloc columns                  snd_aio  ●●●●◉○○○ Review  📜 captain review
+   ↳ In Progress                                                            ↳ rig · ready
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Delta    KB-48310  Supply Selection (TW)                           snd_aio  ●●●●●●◉○ Merge   🟡 idle
-   ↳ Ready For Testing                                                       ↳ #1531 · hold
+ Delta    KB-48310          Supply Selection (TW)                  snd_aio  ●●●●●●◉○ Merge   🟡 idle
+   ↳ Ready For Testing                                                      ↳ #1531 · hold
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Golf     fleet-board-wrap  Board text wrapping                    frigate  ●●●●●●●◉ Ship    🟡 idle
+                                                                            ↳ committed
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
