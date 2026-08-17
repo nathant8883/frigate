@@ -14,7 +14,7 @@ poll loop around `gh` / `gravi` — the traps are in `bin/burner-live`'s own com
 
 Exit: 0 live · 1 not live (timeout, or --once snapshot) · 2 CI failed · 3 burner/commit unusable.
 
-Why this is not a two-liner — the four things that make the burner loop wrong by default:
+Why this is not a two-liner — the five things that make the burner loop wrong by default:
 
   1. CI publishes on PROMOTE, not on build. Images push as `pending-<short_sha>` and are retagged
      to `:<build_sha>` + the branch tag only after tests pass. A green build job means nothing yet.
@@ -26,9 +26,17 @@ Why this is not a two-liner — the four things that make the burner loop wrong 
   4. Ground truth is reachable unauthenticated from outside the cluster, and nobody uses it:
      `/api/version` returns the backend image's baked-in GIT_SHA, and the frontend entry bundle
      embeds VITE_COMMIT_HASH (`version: "<short_sha>"`, from the Faro init).
+  5. The image's TAG and the sha BAKED INTO it are different things, so EQUALITY IS THE WRONG TEST.
+     `check-image` keys the tag on the last commit touching the service, but the build bakes
+     `GIT_SHA=${{ github.sha }}` — HEAD. When the keyed image is missing and CI rebuilds, the image
+     published as `:b0fc6f0` reports `daed379` from inside. (Same divergence when check-image's
+     `fetch-depth: 250` lookback finds nothing and falls back to HEAD.) So the question is
+     CONTAINMENT: is the deployed commit the expected key, or a DESCENDANT of it? An ANCESTOR is the
+     genuine "burner is behind" case and still fails.
 
 So this waits on the registry (mom) for promotion, nudges autosync, then PROVES the running app is
-on the expected sha per service, rather than trusting a workflow badge or a pod age.
+serving code that contains the expected sha per service, rather than trusting a workflow badge or a
+pod age.
 """
 import argparse
 import json
@@ -107,6 +115,11 @@ def gravi_json(*args, timeout=90):
 def git(repo, *args):
     rc, out, err = run(["git", "-C", repo, *args])
     return (out.strip() if rc == 0 else None)
+
+
+def git_rc(repo, *args, timeout=120):
+    """Exit code only — `merge-base --is-ancestor` answers in its rc, not on stdout."""
+    return run(["git", "-C", repo, *args], timeout=timeout)[0]
 
 
 # ---------------------------------------------------------------- mom: registry truth
@@ -194,14 +207,23 @@ def http_get(url, timeout=25, headers=None, limit=None):
 
 
 def backend_sha(base):
-    """The backend image's baked-in GIT_SHA, straight from the running pod."""
+    """The backend image's baked-in GIT_SHA, straight from the running pod.
+
+    Prefer the FULL sha (`{"sha": ..., "short_sha": ...}`) — ancestry is computed against it, and a
+    7-char prefix can go ambiguous. Short is the fallback for older images.
+    """
     status, body = http_get(f"{base}/api/version", limit=4096)
     if status != 200:
         return None
     try:
-        return (json.loads(body).get("short_sha") or "").strip() or None
+        payload = json.loads(body)
     except ValueError:
         return None
+    for key in ("sha", "short_sha"):
+        value = (payload.get(key) or "").strip()
+        if value:
+            return value
+    return None
 
 
 ASSET_RE = re.compile(rb"/assets/index-[A-Za-z0-9_-]+\.js")
@@ -237,11 +259,15 @@ FARO_RE = re.compile(rb'"bb-frontend",\s*version:\s*"([0-9a-f]{7,40})"')
 
 
 def frontend_state(base, asset, want, cache):
-    """(matches, served_sha) for the bundle the burner is actually serving.
+    """(served_sha, holds_want) for the bundle the burner is actually serving.
 
     The commit sha rides in the Faro init (`name: "bb-frontend", version: "<short_sha>"`), which
     lands in the last few KB of the entry chunk — so a tail Range request answers it for 256 KB
     instead of 13 MB. Cached per asset: an un-rolled pod keeps serving the same file.
+
+    `served_sha` is what the bundle says it is; the CALLER decides whether that contains `want`.
+    When the Faro init isn't in the tail we can't name the served sha, so we fall back to grepping
+    the whole chunk for `want` — that proves a match but can never name a miss, hence `holds_want`.
     """
     key = (asset, want)
     if key in cache:
@@ -252,14 +278,13 @@ def frontend_state(base, asset, want, cache):
     if status in (200, 206):
         m = FARO_RE.search(tail)
         if m:
-            served = m.group(1).decode()[:7]
+            served = m.group(1).decode()
     if served is not None:
-        out = (served == want[:7], served)
+        out = (served, None)
     else:
-        # Faro init wasn't in the tail — fall back to a positive containment check over the
-        # whole chunk (streamed, never held in memory). Can prove a match, can't name a miss.
+        # Streamed, never held in memory.
         found, _ = _stream_contains(url, want.encode())
-        out = (found, want if found else None)
+        out = (None, found)
     cache[key] = out
     return out
 
@@ -282,6 +307,34 @@ def expected_shas(repo, sha):
 def remote_branches(repo, sha):
     raw = git(repo, "branch", "-r", "--contains", sha) or ""
     return [b.strip() for b in raw.splitlines() if b.strip() and "->" not in b]
+
+
+def resolve(repo, ref):
+    """Full sha for a ref, or None when it isn't in this repo (or the prefix is ambiguous)."""
+    return git(repo, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}")
+
+
+def relation(repo, key, deployed):
+    """How the DEPLOYED commit relates to the sha its image is keyed on.
+
+    'same' · 'ahead' (deployed is a descendant — it contains the key, so the burner is current)
+    · 'behind' (deployed is an ancestor — genuinely stale) · 'diverged' · 'unknown'.
+
+    Both sides go through rev-parse first, so a 7-char probe never string-compares against a 40-char
+    key. `merge-base --is-ancestor` exits 128 on an object it doesn't have — reading that as "not an
+    ancestor" would turn "I can't tell" into a confident wrong answer, so resolve first and only
+    then ask.
+    """
+    a, b = resolve(repo, key), resolve(repo, deployed)
+    if not a or not b:
+        return "unknown"
+    if a == b:
+        return "same"
+    if git_rc(repo, "merge-base", "--is-ancestor", a, b) == 0:
+        return "ahead"
+    if git_rc(repo, "merge-base", "--is-ancestor", b, a) == 0:
+        return "behind"
+    return "diverged"
 
 
 # ---------------------------------------------------------------- CI (fail-fast only)
@@ -361,6 +414,8 @@ def main():
                     help="don't nudge autosync; just watch its own ≤3-min poll")
     ap.add_argument("--no-branch-check", action="store_true",
                     help="don't refuse when the burner was built off another branch")
+    ap.add_argument("--no-fetch", action="store_true",
+                    help="don't fetch when the deployed sha isn't in the local repo")
     ap.add_argument("--once", action="store_true", help="single snapshot, no waiting, no trigger")
     ap.add_argument("--json", dest="as_json", action="store_true")
     args = ap.parse_args()
@@ -431,6 +486,51 @@ def main():
     log("rebuilt by this commit: " + (", ".join(must_roll) or "nothing") +
         "  |  keyed on an earlier commit: " +
         ", ".join(f"{s}@{expected[s]}" for s in SERVICES if s not in must_roll))
+    if not [s for s in must_roll if s not in KEYS_OFF_HEAD]:
+        # e.g. an automation/ or docs/ commit. The frontend still rebuilds (always_key_off_head), so
+        # there IS something to wait for — but every other service keeps an image built from an
+        # earlier commit, and may report a sha NEWER than its key (see trap 5). Containment, not
+        # equality, is what proves those.
+        log(f"{short} touches no service tree — only the frontend rebuilds; the rest are proven by"
+            " containment (their sha must be their key or a descendant of it)")
+
+    # The deployed sha may not be in this checkout (stale worktree). One scoped fetch, then say so —
+    # an undeterminable ancestry must never fall through to a pass.
+    remote = branches[0].split("/", 1)[0] if "/" in branches[0] else None
+    fetched = set()          # deployed shas we've already gone to the remote for, once each
+
+    def contains(key, deployed):
+        rel = relation(repo, key, deployed)
+        if rel != "unknown" or args.no_fetch or not remote or deployed in fetched:
+            return rel
+        fetched.add(deployed)
+        log(f"deployed sha {deployed[:7]} isn't in this checkout — fetching {remote}/{branch}")
+        run(["git", "-C", repo, "fetch", "--no-tags", remote, branch], timeout=180)
+        if not resolve(repo, deployed):
+            # Fetching a bare sha needs the server to allow it; harmless when it refuses.
+            run(["git", "-C", repo, "fetch", "--no-tags", remote, deployed], timeout=180)
+        return relation(repo, key, deployed)
+
+    def judge(svc, running, relations):
+        """(is_proof, line) for a service that self-reports the sha it is running."""
+        key, seen_sha = expected[svc], running[:7]
+        rel = relations[svc] = contains(key, running)
+        if rel == "same":
+            note = "rolled" if svc in must_roll else \
+                f"unchanged — commit didn't touch {svc}/ or shared/"
+            return True, f"{svc:<20} {seen_sha}  {note}"
+        if rel == "ahead":
+            return True, f"{svc:<20} {seen_sha}  newer than key {key} — contains it"
+        if rel == "behind":
+            return False, f"{svc} serving {seen_sha} — behind its image key {key}"
+        if rel == "diverged":
+            return False, f"{svc} serving {seen_sha} — not in {short}'s history (key {key})"
+        if running in fetched:
+            tried = f"even after fetching {remote}/{branch}"
+        else:
+            tried = "(--no-fetch)" if args.no_fetch else "(no remote to fetch from)"
+        return False, (f"{svc} serving {seen_sha} — not in the local repo {tried}, so containment"
+                       f" against key {key} is undeterminable")
 
     py = gravi_python()
     if not py:
@@ -588,6 +688,7 @@ def main():
                 next_pods = now + MOM_PODS_EVERY
 
         waiting, proof, caveats = [], [], []
+        deployed, relations = {}, {}
 
         if pods is None:
             # Only a blocker when pod state is the *only* evidence available for a rolled service.
@@ -614,23 +715,26 @@ def main():
         running = backend_sha(base)
         if running is None:
             waiting.append("backend /api/version unreachable")
-        elif running != expected["backend"]:
-            waiting.append(f"backend serving {running}, want {expected['backend']}")
         else:
-            note = "rolled" if "backend" in must_roll else "unchanged — commit didn't touch backend/ or shared/"
-            proof.append(f"{'backend':<20} {running}  {note}")
+            deployed["backend"] = running
+            ok, line = judge("backend", running, relations)
+            (proof if ok else waiting).append(line)
 
         asset = frontend_asset(base)
         if not asset:
             waiting.append("frontend index unreachable")
         else:
-            ok, served = frontend_state(base, asset, expected["frontend"], asset_cache)
-            if ok:
-                proof.append(f"{'frontend':<20} {expected['frontend']}  bundle {asset.split('/')[-1]}")
-            elif served:
-                waiting.append(f"frontend serving {served}, want {expected['frontend']}")
+            bundle = asset.split("/")[-1]
+            served, holds = frontend_state(base, asset, expected["frontend"], asset_cache)
+            if served:
+                deployed["frontend"] = served
+                ok, line = judge("frontend", served, relations)
+                (proof if ok else waiting).append(line + (f"  bundle {bundle}" if ok else ""))
+            elif holds:
+                # Couldn't read the served sha, but the bundle contains the one we want.
+                proof.append(f"{'frontend':<20} {expected['frontend']}  bundle {bundle}")
             else:
-                waiting.append(f"frontend bundle {asset.split('/')[-1]} isn't {expected['frontend']}")
+                waiting.append(f"frontend bundle {bundle} isn't {expected['frontend']}")
 
         if not waiting:
             detail = sorted(proof) + [f"! {c}" for c in caveats]
@@ -638,16 +742,19 @@ def main():
                 detail.append("hard-refresh the browser (Ctrl/Cmd-Shift-R) to pick up the new bundle")
             detail.append(base)
             return finish(0, "LIVE", detail, sha=short, branch=branch, expected=expected,
+                          deployed=deployed, relations=relations,
                           url=base, proof=sorted(proof), caveats=caveats)
 
         once("waiting", "rolling: " + "; ".join(waiting))
         beat("still rolling: " + "; ".join(waiting))
         if args.once:
-            return finish(1, "NOT-LIVE", waiting, sha=short, waiting=waiting, url=base)
+            return finish(1, "NOT-LIVE", waiting, sha=short, waiting=waiting, url=base,
+                          expected=expected, deployed=deployed, relations=relations)
         if timed_out:
             return finish(1, "TIMEOUT",
                           waiting + [f"gave up after {human(elapsed)}"],
-                          sha=short, waiting=waiting, url=base)
+                          sha=short, waiting=waiting, url=base,
+                          expected=expected, deployed=deployed, relations=relations)
         time.sleep(POLL_ROLL)
 
 

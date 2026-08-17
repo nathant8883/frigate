@@ -145,14 +145,18 @@ it names the actual blocker (`frontend serving 6021ee3, want 7aeb2fb`, `burner w
 Don't sit in the foreground polling, and don't announce "waiting for the burner" — the captain wants
 one message, when it's actually live.
 
-**Three things that make naive burner-watching wrong**, all handled by the script — know them anyway:
+**Four things that make naive burner-watching wrong**, all handled by the script — know them anyway:
 
 - **CI publishes on *promote*, not on build.** Images push as `pending-<short_sha>` and only get the
   `:<build_sha>` + branch tags after tests pass. A green *build* job means nothing to a burner.
 - **Each service's image is keyed on its own sha** — the last commit touching `<service>/` or
   `shared/` — **except frontend**, which rebuilds every commit. So after a frontend-only push,
-  `/api/version` reporting an *older* backend sha is **correct**, not "not live yet". Never wait for
-  backend to match HEAD unless HEAD touched `backend/` or `shared/`.
+  `/api/version` reporting an *older* backend sha is **correct**, not "not live yet".
+- **Never test the deployed sha for equality — test containment.** The image's *tag* and the sha
+  *baked inside it* are different things: check-image keys the tag on the last commit touching the
+  service, but the build bakes `GIT_SHA=HEAD`, so an image published as `:b0fc6f0` can report
+  `daed379` from inside and be perfectly current. The question is whether the deployed commit **is
+  the key or a descendant of it**; only an **ancestor** means the burner is really behind.
 - **A burner rolls on the branch tag, via autosync's ≤3-min poll.** One started off a *sha* or a
   different branch will never pick your commit up — no amount of waiting fixes it; start a fresh one.
 
