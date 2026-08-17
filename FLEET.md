@@ -25,9 +25,6 @@ Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
  Charlie  KB-49995          Carrier alloc columns                  snd_aio   ●●●●◉○○○ Review  📜 captain review
    ↳ In Progress                                                             ↳ draft #1595
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Juliet   KB-50420          Sites quick search (SSRM)              snd_aio   ●●●●◉○○○ Review  📜 captain review
-   ↳ In Progress                                                             ↳ draft #1631 · captain gate
- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Kilo     burner-live-fix   burner-live false negative             frigate   ●●●●●●●◉ Ship    🔄 working
                                                                              ↳ ac30a0c committed
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
