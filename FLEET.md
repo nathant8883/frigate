@@ -10,9 +10,6 @@ Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
  Alpha    KB-48925          Compartment products (TW)              snd_aio  ●●●●◉○○○ Review  🔴 feedback
    ↳ Ready for Review                                                       ↳ #1581 · RC merge
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Delta    KB-48310          Supply Selection (TW)                  snd_aio  ●●●●●●●◉ Ship    🔴 feedback
-   ↳ Done                                                                   ↳ #1531 merged
- ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
  Echo     KB-49795          Freight txn safety                     snd_aio  ●●●●◉○○○ Review  📜 captain review
    ↳ In Progress                                                            ↳ draft #1555
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -33,9 +30,6 @@ Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
 
 ❓ **Alpha · KB-48925** — pre-trip writes equipment numbers without ids — leave Alpha's read-time fallback as
    the fix, or also capture ids at the source?
-
-❓ **Delta · KB-48310** — KB-48310 is merged and Done — tear Delta down, or keep its pane for the parked
-   split-load demo?
 
 ❓ **Foxtrot · KB-48819** — E2E repeatability needs shared-suite surgery (seed_shift leaks all 8 shifts per
    run) — spend a third cycle, or stop with both approved fixes and write it up?
