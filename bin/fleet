@@ -11,7 +11,7 @@ fleet.json is the mate's source of truth. The Crew column is overlaid live from 
 render time, joined on worktree path (cwd) — durable across herdr restarts (pane ids are not).
 Run it on a refresh loop for a live dashboard:  watch -n 5 /home/nturner/frigate/bin/fleet
 """
-import json, os, re, shutil, subprocess, sys
+import json, os, re, shutil, subprocess, sys, unicodedata
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LEDGER = os.path.join(ROOT, "fleet.json")
@@ -22,7 +22,7 @@ SNAPSHOT = os.path.join(ROOT, "FLEET.md")
 # continuation-line Jira budget keys off it, so a wider pane means wider summaries and
 # less Jira truncation. Widen the dashboard pane and the board widens with it. Override
 # the auto-detected width with FLEET_WIDTH=<cols> (e.g. for FLEET.md snapshots).
-SUMMARY_MIN, SUMMARY_MAX = 20, 120
+SUMMARY_MIN, SUMMARY_MAX = 12, 120
 SUBSTEP_MIN = 24     # phase substep (PR #, test target) floor on the stacked continuation line
 
 
@@ -65,18 +65,56 @@ FEEDBACK = "🔴 feedback"   # ledger `blocked` note set → crew is waiting on 
 CAPTAIN_REVIEW = "📜 captain review"
 
 
-def trunc(s, n):
-    s = str(s)
-    return s if len(s) <= n else s[: n - 1] + "…"
-
-
-# status circles render as two terminal cells but len() counts them as one;
-# dwidth/pad keep columns aligned when a crew emoji is present.
-WIDE = set("🔄🟢🔴🟡⚪❔🐞")
-
-
+# Every width on the board is measured in *terminal cells*, not codepoints: the status
+# emoji (📜 🔄 🔴 🐞 …) each occupy two cells while len() counts them as one, and a single
+# miscounted cell pushes that row one column past the pane edge — the terminal then wraps
+# the tail onto its own line and the whole board reads as broken. Ask unicodedata rather
+# than keeping a hand-written emoji list: the list went stale the moment 📜 (captain
+# review) was added, and every draft-PR row overflowed by exactly one cell.
+# Ambiguous-width characters (● ○ · —) stay single, which is how the fleet's panes draw them.
 def dwidth(s):
-    return sum(2 if ch in WIDE else 1 for ch in str(s))
+    s = str(s)
+    w = 0
+    for i, ch in enumerate(s):
+        if unicodedata.category(ch) in ("Mn", "Me", "Cf"):
+            continue                       # combining marks, VS16, ZWJ — no cell of their own
+        wide = unicodedata.east_asian_width(ch) in ("W", "F")
+        if not wide and i + 1 < len(s) and s[i + 1] == "️":
+            wide = True                    # VS16 forces emoji presentation → two cells
+        w += 2 if wide else 1
+    return w
+
+
+def trunc(s, n):
+    """Cut to n terminal cells, ellipsis included."""
+    s = str(s)
+    if dwidth(s) <= n:
+        return s
+    out, w = "", 0
+    for ch in s:
+        cw = dwidth(ch)
+        if w + cw > n - 1:
+            break
+        out, w = out + ch, w + cw
+    return out + "…"
+
+
+def wrap(text, width, indent=""):
+    """Greedy word-wrap to `width` cells; continuation lines carry `indent`.
+
+    The attention lists below the grid hold a whole sentence from the ledger, so without
+    this the terminal hard-wraps them at the pane edge — mid-word, mid-identifier.
+    """
+    lines, cur, lead = [], "", ""
+    for word in str(text).split():
+        cand = word if not cur else cur + " " + word
+        if cur and dwidth(lead + cand) > width:
+            lines.append(lead + cur)
+            lead, cur = indent, word
+        else:
+            cur = cand
+    lines.append(lead + cur)
+    return lines
 
 
 def pad(s, w):
@@ -299,8 +337,8 @@ def render():
                     - 4 * GAP - dwidth("↳ ") - max_substep)           # room for the substep
     # Summary takes exactly the room the pane has: `fill` is a ceiling, not just a target, so
     # a long summary or Jira line gets an ellipsis instead of pushing every row (and the rule)
-    # past the pane edge — which wraps the whole board and looks broken. SUMMARY_MIN floors it,
-    # so below ~85 cols the board still overflows; widen the pane rather than shrink the floor.
+    # past the pane edge — which wraps the whole board and looks broken. SUMMARY_MIN floors it;
+    # a pane too narrow even for that is handled by the clamp on total_w below.
     widths["summary"] = max(SUMMARY_MIN, fill)
     for p, _, _ in rows:                   # truncate summaries to the resolved width
         p["summary"] = trunc(p["summary"], widths["summary"])
@@ -325,11 +363,14 @@ def render():
     rows = [(p, jira, trunc(substep, substep_w) if substep else substep)
             for p, jira, substep in rows]
     cont_ends = [phase_start + dwidth("↳ " + s) for _, _, s in rows if s]
-    total_w = max([crew_x + widths["crew"]] + cont_ends)
+    # Last line of defence: on a pane too narrow for even the floored columns, cut each row at
+    # the edge rather than let the terminal wrap it. A truncated row keeps the grid readable;
+    # a wrapped one throws every column below it out of alignment and the board looks broken.
+    total_w = min(max([crew_x + widths["crew"]] + cont_ends), TERM)
 
     def primary_line(d):
         left = LEAD + (" " * GAP).join(pad(d.get(k, ""), widths[k]) for k in left_order)
-        return (pad(left, crew_x) + d.get("crew", "")).rstrip()
+        return trunc((pad(left, crew_x) + d.get("crew", "")).rstrip(), TERM)
 
     def cont_line(jira, substep):
         left = LEAD + ("  ↳ " + jira if jira else "")
@@ -339,13 +380,18 @@ def render():
         seg = pad(left, phase_start)                     # place substep's ↳ under the phase column
         if substep:
             seg += "↳ " + substep
-        return seg.rstrip()
+        return trunc(seg.rstrip(), TERM)
 
     stamp = "static (herdr skipped/down)" if live is None else "live"
     rule = LEAD + "─" * max(0, total_w - dwidth(LEAD))
-    out = [f"# Fleet — in-flight work   ·   crew = {stamp}", "",
-           phase_legend(), "",
-           primary_line({k: h for k, h in cols})]
+
+    def fit(line):
+        """Wrap a header line only if it truly overflows — a no-op at any usable pane
+        width, so the title's deliberate spacing survives untouched."""
+        return wrap(line, TERM) if dwidth(line) > TERM else [line]
+
+    out = (fit(f"# Fleet — in-flight work   ·   crew = {stamp}") + [""]
+           + fit(phase_legend()) + ["", primary_line({k: h for k, h in cols})])
     for p, jira, substep in rows:
         out.append(rule)
         out.append(primary_line(p))
@@ -368,10 +414,15 @@ def render():
         return "**" + " · ".join([p for p in (it.get("name"), it.get("ticket", "—")) if p]) + "**"
 
     def block(header, lines):
-        """A section: header, then glyph lines separated by a blank line (never bulleted)."""
+        """A section: header, then glyph lines separated by a blank line (never bulleted).
+
+        Each line is word-wrapped to the pane and its continuation hangs under the subject
+        (past the glyph), so a long ask reads as one indented paragraph instead of being
+        chopped mid-word at the right edge.
+        """
         body = []
         for ln in lines:
-            body += ([""] if body else []) + [ln]
+            body += ([""] if body else []) + wrap(ln, TERM, "   ")
         return ["", header, ""] + body
 
     blocked = [it for it in led.get("in_flight", []) if it.get("blocked")]
