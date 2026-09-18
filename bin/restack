@@ -1,0 +1,127 @@
+#!/usr/bin/env python3
+"""Restack a crew's branch onto a moved or merged parent.
+
+    bin/restack bravo --dry-run     # show the plan, touch nothing
+    bin/restack bravo               # do it
+    bin/restack bravo --onto RC     # override the computed new base
+
+Under squash-merge a landed parent's commits are *redundant* in the child, not
+conflicting — RC already holds that content. So the correct move is never to
+merge or resolve, but to replay only the child's own commits and discard the
+parent's, by naming the sha the child was cut from as the rebase boundary:
+
+    git rebase --onto <new-base> <base_sha> <branch> --update-refs
+
+The boundary is the whole trick, and guessing it is what turns a ten-minute
+restack into an hour. `fleet.json` records it per crew as `base_sha`, so this
+never has to guess. See docs/branch-stacking.md.
+"""
+
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+LEDGER = ROOT / "fleet.json"
+REMOTE = "supply_and_dispatch_aio"
+
+
+def sh(args, cwd, check=True):
+    r = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    if check and r.returncode != 0:
+        print(f"! {' '.join(args)}\n{r.stderr.strip()}", file=sys.stderr)
+        sys.exit(1)
+    return r.stdout.strip()
+
+
+def find(key):
+    rows = json.loads(LEDGER.read_text()).get("in_flight", [])
+    k = key.strip().lower()
+    hit = [r for r in rows if (r.get("name") or "").lower() == k or (r.get("ticket") or "").lower() == k]
+    if not hit:
+        print(f"No in-flight crew or ticket matching {key!r}.", file=sys.stderr)
+        print("  " + ", ".join(f"{r.get('name')}/{r.get('ticket')}" for r in rows), file=sys.stderr)
+        sys.exit(1)
+    return hit[0]
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("crew")
+    ap.add_argument("--onto", help="new base ref (default: computed from the parent)")
+    ap.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args()
+
+    row = find(a.crew)
+    wt, branch = row.get("worktree", ""), row.get("branch", "")
+    base_sha, parent = row.get("base_sha"), row.get("parent")
+
+    if not Path(wt).is_dir():
+        sys.exit(f"{row['name']}: worktree is gone — {wt}")
+    if not base_sha:
+        sys.exit(f"{row['name']}: no base_sha recorded; set it on the ledger before restacking.")
+
+    sh(["git", "fetch", REMOTE, "RC"], wt)
+
+    # New base: the parent branch if it still exists on the remote, else RC —
+    # a vanished parent branch means it was squash-merged and deleted.
+    if a.onto:
+        new_base = a.onto
+    elif parent and sh(["git", "ls-remote", "--heads", REMOTE, parent], wt):
+        sh(["git", "fetch", REMOTE, parent], wt)
+        new_base = f"{REMOTE}/{parent}"
+    else:
+        new_base = f"{REMOTE}/RC"
+
+    dirty = sh(["git", "status", "--porcelain"], wt)
+    own = sh(["git", "log", "--oneline", f"{base_sha}..{branch}"], wt)
+    merges = sh(["git", "log", "--oneline", "--merges", f"{base_sha}..{branch}"], wt)
+
+    print(f"crew      {row.get('name')} · {row.get('ticket')}")
+    print(f"branch    {branch}")
+    print(f"boundary  {base_sha}   (commits below this are the parent's — discarded)")
+    print(f"new base  {new_base}   ({sh(['git', 'rev-parse', '--short', new_base], wt)})")
+    print(f"replaying {len(own.splitlines())} commit(s):")
+    for line in own.splitlines()[:12]:
+        print(f"    {line}")
+
+    if dirty:
+        sys.exit("\n! working tree is dirty — commit or stash first (note: git stash is SHARED across worktrees).")
+    if merges:
+        print("\n! branch range contains merge commits:", file=sys.stderr)
+        for line in merges.splitlines():
+            print(f"    {line}", file=sys.stderr)
+        sys.exit(
+            "! The boundary is meaningless with merges in the range — a replay will drag the\n"
+            "! parent's history back in. Rebuild the branch as its net delta on the new base\n"
+            "! instead, and stop merging the parent in (docs/branch-stacking.md)."
+        )
+
+    cmd = ["git", "rebase", "--onto", new_base, base_sha, branch, "--update-refs"]
+    print(f"\n$ {' '.join(cmd)}")
+    if a.dry_run:
+        print("(dry run — nothing done)")
+        return
+
+    r = subprocess.run(cmd, cwd=wt)
+    if r.returncode != 0:
+        sys.exit("\n! rebase stopped — resolve in the worktree, or `git rebase --abort`. "
+                 "Conflicts here are real, not duplicate history.")
+
+    head = sh(["git", "rev-parse", "--short", branch], wt)
+    print(f"\nrestacked: {branch} @ {head} on {new_base}")
+    print("next: verify, then `git push --force-with-lease`. Do NOT create a backup branch.")
+    print(f"      children stacked on this branch need their base_sha updated to {head}.")
+
+    d = json.loads(LEDGER.read_text())
+    for r_ in d["in_flight"]:
+        if r_.get("ticket") == row.get("ticket"):
+            r_["base_sha"] = sh(["git", "rev-parse", new_base], wt)
+    LEDGER.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+    print("      ledger base_sha updated.")
+
+
+if __name__ == "__main__":
+    main()
