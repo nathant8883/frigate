@@ -84,6 +84,34 @@ has to reconstruct context for is a wasted line.
 
 **The test before you send:** if he read *only this line*, could he answer or act? If not, rewrite it.
 
+### An ❓ carries its own problem — "the problem is X, should I do Y?"
+
+**A ❓ that names only the choice is not askable.** "Fix on this branch or separately?" and "widen the
+hit-test or add chips?" are decisions he cannot make, because the words that would let him decide — what
+is actually broken, where, and what each answer costs — are in the crew's report and not in his line. He
+reads cold: the option names mean nothing without the problem behind them.
+
+So every ❓ is **two clauses, one line**: the *problem* — what's wrong, and where — then the *choice*.
+
+```
+❓ **Charlie · KB-49995** — 197 directives blank their weekly number on the 1st–2nd because weekly_cv
+   reads the week-start month; the fix opens contract-volume resolution for straddling weeks in pricing/.
+   Take it on this branch, or never?
+```
+
+**Two sentences is the budget, and the problem gets the first one.** If the problem won't compress into
+a sentence, that means you don't understand it well enough to ask about it yet — go read the crew's
+report again, not add a third sentence. Cut what he'd never act on (file paths, sha, test counts) before
+cutting the problem.
+
+| ✗ choice with no problem | ✓ problem then choice |
+|---|---|
+| ❓ **Lima · KB-50563** — single-order drag source: widen the AG Grid pointer hit-test, or add draggable order chips to the board card? | ❓ **Lima · KB-50563** — the board has no per-order drag source: a TurnCard drags whole, single orders only drag as grid rows inside the turn-details panel. Keep the drag inside that panel, or put draggable order chips on the card so it works from the board? |
+| ❓ **Charlie · KB-49995** — the qa-consolidate §4 false-green command: fix on this branch or separately? | ❓ **Charlie · KB-49995** — the shared qa-consolidate skill's §4 prescribes a pytest invocation that reports green when tests didn't run, so anyone following it ships on a false pass. Fix it on this branch, or never? |
+
+**When each answer costs something different, say what** — that's usually the whole decision. "Cheap
+here, opens straddling-week resolution" is the ask; "which do you prefer" is not.
+
 ### Prose — only when he asks for detail
 
 Glyph lines govern every unprompted report and anything that fits in lines. An explicit "explain X"
@@ -130,8 +158,9 @@ announcing edits. The tagged lines come at the end, not along the way.
 |---|---|---|---|
 | **snd_aio** (AIO) | `projects/supply_and_dispatch_aio` | draft-PR-only — never a full PR without the captain | `docs/snd-aio-sdlc.md` |
 | **crossroads** (XR) | `projects/crossroads` | product — base branch **`test`** (its RC); `XR-` Jira keys; `xr-*` SDLC not yet ported — dispatch generically for now | — |
-| **bestbuy_tools** (bb_tools) | `projects/bestbuy_tools` | tooling repo — **rebase-only, no PR, no merge** (see below); houses BBDClient / testbed / crossroads code (see Toolbelt) | — |
-| deployment_configs | `projects/deployment_configs` | config / direct | — |
+| **bestbuy_tools** (bb_tools) | `projects/bestbuy_tools` | tooling repo — **rebase-only, no PR, no merge** (see below); remote is **`bb_tools`**, not `origin`; houses BBDClient / testbed / crossroads code (see Toolbelt) | — |
+| **kuberist_v2** (kbr) | `projects/kuberist_deployment_configs` | infra-as-code — **rebase + push, no PR, no merge** (see below); base branch **`master`**, remote `origin`; `COS-` Jira keys; **v1 migration still in flight** | — |
+| deployment_configs (v1) | `projects/deployment_configs` | config / direct — **superseded by kuberist_v2**, still holds unmigrated envs | — |
 
 Each project has its own lifecycle; AIO's is the mature one. **When you pick up a ticket, read its
 project's playbook first** — the stages, branch model, and Jira rules below are AIO's.
@@ -144,6 +173,29 @@ worktrees off `origin/test` (the local `test` runs behind). Jira keys are `XR-`;
 `xr-` prefix. Only **plumbing** exists so far (checkout + herdr workspace `crossroads` + this entry) —
 the `xr-*` SDLC set (adapted from `snd-*`) is a follow-up for the first real crossroads ticket, so drive
 early tickets with a hand-written brief rather than an `snd-sdlc`-style orchestrator.
+
+**kuberist_v2** (`gravitate-energy/kuberist-deployment-configs`, remote `origin`) was onboarded 2026-09-17 by
+moving the captain's PycharmProjects checkout into `projects/kuberist_deployment_configs`. It is **v2 of
+deployment_configs** — the infrastructure-as-code for every deployed app: Kustomize `bases/` + per-cluster
+`clusters/{dev,prod,prod-proxy,costcoprod}/<env>/` overlays, ArgoCD apps under `argocd/apps/`, the image
+mapping in `config/image-mappings.json`, and secret sync from Google Secret Manager via `sync-secrets.py`
+(see `SECRETS.md`). **The v1 repo is not fully migrated** — `projects/deployment_configs` still holds envs
+that haven't moved, and the migration's own tooling lives here (`tools/migration/`, `tools/convert-env/`,
+`docs/migration/path-map.csv`).
+
+**kuberist_v2 SDLC — rebase + push. No PR. No merge.** (Captain, 2026-09-17.) Same shape as bb_tools:
+squash to one commit, `git fetch origin master`, rebase fast-forward onto `origin/master`, push. No draft
+PR, no review gate — so a change landing straight on `master` with no PR is **correct**, not a bypass. The
+AIO gates (Review → Validation → Merge) don't exist here, so a delivered item goes to **Shipped**.
+
+Two things about this repo specifically:
+- **`master` moves constantly on its own.** Kuberist's GitOps bot commits `Deploy <service>:sha-… to <env>`
+  on every image promotion, so the branch advances between your fetch and your push. Always re-fetch and
+  rebase immediately before pushing; a stale local `master` is the normal state, not a warning sign.
+- **`secret-scan` is a required check.** `.github/workflows/secret-scan.yml` runs structural ConfigMap/
+  Secret rules (`tools/migration/scan_manifests.py`) plus gitleaks on every push to `master`. The legacy v1
+  manifests carried credentials inside ConfigMaps, so a red scan means credentials are about to land — stop,
+  don't work around it.
 
 **bb_tools SDLC — rebase-only. No PR. No merge. Do not apply AIO's ceremony here.** (Captain, 2026-08-04.)
 
@@ -256,6 +308,76 @@ The SDLC itself now lives **in the SND repo** as the `snd-sdlc` orchestrator + t
    captain's calls. Surface them and track on the board; never open a non-draft PR or merge yourself.
 5. **Report** to the captain; move the row to **Recently done** when merged — then **tear the crew down**
    (below). Retiring a row is not finished until the crew behind it is gone.
+
+### Jira comments are test coverage only (captain, 2026-08-18)
+
+`snd-jira` authorises **one** comment: the coverage summary from `/post-tests`, plus the E2E yes/no call in
+that thread. That is the entire permission, and it is about **test coverage** — not a licence to narrate.
+
+**Never comment on a ticket with** scope drift, decisions and their rationale, rejected alternatives, what
+the captain ruled, or recommendations. Decisions belong in the **PR body** and in the crew's **FLEET STATUS**
+to the mate. A crew reporting "Jira comment posted" about anything other than coverage is reporting an
+overreach — challenge it, don't relay it as progress.
+
+### Never propose a ticket (captain, 2026-08-18)
+
+**Do not suggest creating a Jira ticket, in any wording** — not "file it separately", not "worth its own
+ticket", not "follow-up", and not as one option in a list. **Every ticket is debt.** A finding either
+lands on the work in hand or is never done; there is no third state where it waits in a ticket.
+
+When a crew surfaces something out of scope, the question you put to the captain is **"on this branch, or
+never?"** — with what it would cost to do it here. Never "shall I file it?". He creates tickets himself
+and says so unprompted.
+
+**Brief this into every dispatch.** Crews propose follow-up tickets by default — it reads as deferential
+and it is the single most common thing they volunteer. The `snd-housekeeping` rule "call it out, don't own
+it" is correct about *not fixing* an adjacent defect, but "call it out" means **state it in the report or
+PR body and stop** — it is not an instruction to nominate a ticket for it.
+
+### Stacked branches — replay, never reconcile (captain, 2026-08-18)
+
+AIO is **squash-merge only**, so when a parent lands, a child's copies of the parent's commits become
+**redundant, not conflicting** — RC already holds that content. GitHub still reports CONFLICTING, often
+across a dozen files. **Do not open those files.** The child's copies of the shared files are *older*
+than what just shipped, so resolving them "take mine" reverts merged work.
+
+Replay the child's own commits and discard the parent's, using the recorded boundary:
+
+```bash
+bin/restack <crew> --dry-run     # then without --dry-run
+```
+
+Proven the same day, same files: Alpha (linear history) replayed with **zero conflicts** in ten minutes;
+Foxtrot (five merge commits pulling its parent in) had no usable boundary, needed a full rebuild, and its
+force-push orphaned Bravo downstream.
+
+- **Never merge a parent into a child — rebase onto it.** This is the rule that costs the most when broken.
+- **Record `parent` + `base_sha` on the ledger at dispatch.** `bin/restack` reads them so nobody guesses.
+- **Cap depth at two**, order the stack by merge-readiness, and check the dependency is real.
+- **`rebase.updateRefs`** is on globally — a rebase carries sibling branch refs (the worktrees share one
+  clone). Local only; each child still needs `--force-with-lease` to update its PR.
+- A parent **announces before rewriting history** so the mate can sequence the children.
+
+Full rationale, the rejected alternatives, and the failure signatures: `docs/branch-stacking.md`.
+
+### No safety-net branches — the remote is the backup (captain, 2026-08-18)
+
+**Crews must not create `backup/*`, `*-safety-*`, `pre-<thing>` or similarly-named snapshot branches before
+a rebase, amend, or force-push.** They read as real work to anyone scanning the repo, nothing ever reaps
+them, and by the time someone wonders whether one matters the context that would answer it is gone. Six had
+accumulated across aio and crossroads, the oldest four months old, all of them snapshots of work that had
+long since landed.
+
+**What to do instead:** push the branch. A pushed branch is the backup, and `--force-with-lease` is the
+guard against clobbering it. If a local safety net is genuinely wanted mid-operation, `git reflog` and
+`ORIG_HEAD` already hold the pre-rebase tip with no branch to clean up. Say the sha in the FLEET STATUS
+handoff if it's worth naming — that is the record, not a branch.
+
+**Brief this at dispatch and enforce it on housekeeping.** A crew reporting "safety ref X kept locally" is
+reporting a thing to delete, not a precaution to approve — tell it to drop the ref and rely on the push.
+Prune any you find; record shas in a `docs/pruned-branches-<date>.md` before deleting, because commit counts
+against the base prove nothing (AIO squash-merges, so a landed branch still reports its commits unmerged).
+**Don't delete another dev's branch** — `hunter/wip` and the like stay unless the captain says otherwise.
 
 ### Retiring an item — tear down the crew, not just the row
 
@@ -485,7 +607,7 @@ Full rationale: `docs/snd-aio-sdlc.md` → **Orchestration**.
 
 ## Reference
 
-### herdr CLI drift (pinned at **0.7.5**, protocol 17)
+### herdr CLI drift (pinned at **0.8.0**; last re-checked 2026-08-18)
 
 herdr auto-updates, and it **renames/removes subcommands without deprecating them** — the old spelling
 prints a usage block and exits `0` or `2` rather than failing loudly. Re-check this table after a herdr
@@ -509,6 +631,14 @@ Worth using, added since the manual was written:
   distrusting a status. **Its `evidence:` lags a poll interval**, so a prompt-box snapshot can show text
   you already cleared. Don't conclude key delivery is broken from one stale read — confirm by sending a
   visible character and re-reading, or by `herdr agent wait --until working` after a submit.
+- **`herdr agent start <name> --kind claude --pane <id> [-- <agent args>]`** (0.8.0) — starts an agent in
+  an **existing** pane sitting at its shell prompt, names it in the same call, and blocks until the agent
+  is detected and ready. This is how you **bring a fleet back online after a restart**: panes and
+  worktrees survive, the agents don't, so `agent start … -- --continue` relaunches each crewmate with its
+  prior session restored (context intact — check `~/.claude/projects/<slugged-worktree>/` for a resumable
+  session first). Verified 2026-08-18: all six in-flight crews came back with their last FLEET STATUS.
+- `herdr pane process-info` takes **`--pane <id>`**, not a positional — the positional form exits non-zero
+  with `unknown option`.
 - `herdr api snapshot` (live session state) · `herdr notification show` · `herdr integration`.
 
 The socket API *does* emit push events (`PaneAgentStatusChangedEvent`, `PaneOutputMatchedEvent`), but no
@@ -551,18 +681,26 @@ Installs land in `.claude/skills/<name>/` and are tracked in `skills-lock.json`.
 - `snd-qa-bugs` — QA bug intake: sweep Jira for bug subtasks on board tickets, triage, put the existing
   crew on them, and drive the bug + parent status track. Runs on the heartbeat and at boot.
 
-### Plugins (Claude Code, project-scoped)
+### Plugins (Claude Code)
 
 Plugins (bundles of skills + agents + commands + hooks + MCP) are a separate system from the `skills`
-CLI. frigate manages them at **project scope** so they travel with the repo (`.claude/settings.json`).
+CLI.
 
-- Declare a marketplace: `claude plugin marketplace add <owner/repo> --scope project`
-- Enable a plugin:       `claude plugin install <plugin>@<marketplace> --scope project`
-- Project scope writes `.claude/settings.json` (`extraKnownMarketplaces` + `enabledPlugins`). **Commit it.** Applies on next restart.
+- Declare a marketplace: `claude plugin marketplace add <owner/repo> --scope <user|project>`
+- Enable a plugin:       `claude plugin install <plugin>@<marketplace> --scope <user|project>`
+- Project scope writes `.claude/settings.json` (`extraKnownMarketplaces` + `enabledPlugins`) so it
+  travels with the repo — **commit it**. User scope writes `~/.claude/settings.json` and reaches every
+  agent regardless of cwd. Either applies on next restart.
 
-**Enabled here:** `superpowers@superpowers-marketplace` (`obra/superpowers-marketplace`) — source of
-the `superpowers:*` skills (brainstorming, writing-skills, TDD, systematic-debugging, …). Note: for
-crewmates to get these, also enable superpowers at **user scope** (see Skill placement).
+**Enabled here (verified 2026-09-02):** everything is at **user scope** in `~/.claude/settings.json`, and
+frigate's own `.claude/settings.json` has an **empty** `enabledPlugins` — so don't look for these in the
+repo. The four: `superpowers@claude-plugins-official`, `skill-creator@claude-plugins-official`,
+`code-review@claude-plugins-official`, `gitkraken-hooks@gitkraken`.
+
+**superpowers now ships from `claude-plugins-official`, not `obra/superpowers-marketplace`** — that
+marketplace isn't registered on this box at all. It's the source of the `superpowers:*` skills
+(brainstorming, writing-skills, TDD, systematic-debugging, …). Because it's user-scoped, **crewmates do
+load it** wherever they're working; any note claiming otherwise is stale.
 
 ### Skill naming & skill-vs-context
 
