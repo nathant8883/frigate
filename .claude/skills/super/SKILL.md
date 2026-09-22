@@ -1,6 +1,6 @@
 ---
 name: super
-description: Read Jira tickets, JQL searches, GitHub PRs/reviews/diffs, and ruff format diffs — and write Jira description / acceptance criteria / status / energy points — through the `super` CLI, one bash call per read. Use INSTEAD of the Atlassian MCP for every Jira read (it returns Acceptance Criteria and downloads pasted screenshots, which the MCP does not), instead of hand-rolled `gh api`/`jq` for PR review intake, and instead of running `ruff format` in place. Triggers on any ticket key (KB-/GSD-/XR-/COS-), "read the ticket", "what are the AC", "the subtasks", "transition the ticket", "set it to Ready for Testing", "the PR", "the review comments", "the diff", "format check". Comments are the one thing it cannot do — those still go through the Atlassian MCP.
+description: Read Jira tickets, JQL searches, GitHub PRs/reviews/diffs, and ruff format diffs — and write Jira description / acceptance criteria / status / energy points, and create issues — through the `super` CLI, one bash call per read. Use INSTEAD of the Atlassian MCP for every Jira read (it returns Acceptance Criteria and downloads pasted screenshots, which the MCP does not), instead of hand-rolled `gh api`/`jq` for PR review intake, and instead of running `ruff format` in place. Triggers on any ticket key (KB-/GSD-/XR-/COS-), "read the ticket", "what are the AC", "the subtasks", "transition the ticket", "set it to Ready for Testing", "the PR", "the review comments", "the diff", "format check". Comments are the one thing it cannot do — those still go through the Atlassian MCP.
 ---
 
 # super
@@ -32,6 +32,7 @@ super read ruff://shared/{valuation_shared/events,shared_util}.py
 | `jira://<KEY>/status` | current status **and the exact available transition names** |
 | `jira://<KEY>/desc`, `jira://<KEY>/ac` | that one field, as round-trippable markdown |
 | `jira://<KEY>/points` | the Energy Points estimate, or `no Energy Points set` |
+| `jira://<PROJECT>/create` | the front-matter template for a new issue (write-only route; see below) |
 
 - **Start every ticket with `super read jira://<KEY> jira://<KEY>/children`.** The description
   is usually one sentence of context; the real requirements live in the AC and the subtasks.
@@ -48,6 +49,8 @@ super read  jira://KB-1/ac > /tmp/…/ac.md      # edit it
 super write jira://KB-1/ac < /tmp/…/ac.md
 super write jira://KB-1/status "Ready for Testing"
 super write jira://KB-1/points 7
+super read  jira://KB/create > new.md            # template: summary / type / parent, then the body
+super write jira://KB/create < new.md            # KB-52256: created Story under KB-49253
 ```
 
 - **Read the field first and keep every `[^unrenderable/N]` marker in place.** They stand in
@@ -55,6 +58,10 @@ super write jira://KB-1/points 7
   nodes back wherever the markers still appear. Delete one and you delete that content.
 - **Read `/status` before writing one.** The transition name must match what that issue
   actually offers, and the list differs by issue type and current state.
+- **`create` takes a project, not a ticket** (`jira://KB/create`) and prints the new key. Front matter:
+  `summary` (required), `type` (default `Story`), `parent` (optional epic); the description is the
+  markdown below the closing `---`. Set the AC afterwards with `/ac`. **Only the captain creates
+  tickets** — the route is for carrying out his ask, never for proposing or filing one yourself.
 - **Energy Points is the estimate field** — `points` takes a bare number and resolves the
   custom field by name, so nothing is pinned to a `customfield_*` id. Estimates are the
   captain's call; never set one on your own initiative.

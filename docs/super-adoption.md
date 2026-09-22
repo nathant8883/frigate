@@ -118,6 +118,21 @@ super write jira://KB-50387/points 7    # KB-50387: set Energy Points to 7
 - **Estimates are owner-set.** The route exists so the mate can carry out the captain's call, not
   so a crew can estimate its own ticket. Never set one unasked.
 
+**`jira://<PROJECT>/create` — make an issue** (captain, same day). The Atlassian connector dropped
+after a re-login and failed to reconnect ("Server not found"), which left no way to create a ticket at
+all. The captain chose to build the route rather than wait on the connector.
+
+```bash
+super read  jira://KB/create > new.md    # front matter: summary (required), type (Story), parent
+super write jira://KB/create < new.md    # KB-52256: created Story under KB-49253
+super write jira://KB-52256/ac < ac.md   # AC is a separate write, as for any existing ticket
+```
+
+Addressed by project rather than ticket, so it is caught before key normalisation. Unknown front-matter
+fields are an error, not silently dropped. First issue made this way: KB-52256.
+
+**What still needs the MCP:** comments only. Every other Jira read and write now goes through `super`.
+
 ### How a `super` change gets made — the shape to reuse
 
 Upstream is Wes's repo and our `frigate` branch is **uncommitted build plumbing**, not a fork:
@@ -135,7 +150,9 @@ sits — the plumbing would ride along.
    commit is feature-only. Verify the final `git diff --stat` before committing.
 4. Draft PR to `master`. Non-draft stays the captain's gate.
 
-First one through this path: **PR #3**, branch `jira-points`.
+First through this path: **PR #3** (`jira-points`), then **PR #4** (`jira-create`).
+
+**A change that builds on an unmerged one stacks.** `create` reuses `points` code, so `jira-create` is cut off `origin/jira-points` and PR #4 targets `jira-points`, keeping its diff to the new route. Merge the parent first; the child then retargets to `master`. Note that `main.rs` carries plumbing *and* may carry a feature's help text — reset it and re-apply only the help lines, don't leave it modified when stripping the plumbing.
 
 ## Phase 3 (original) — not taken (captain, 2026-09-18)
 

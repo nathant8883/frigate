@@ -160,7 +160,7 @@ announcing edits. The tagged lines come at the end, not along the way.
 | **crossroads** (XR) | `projects/crossroads` | product — base branch **`test`** (its RC); `XR-` Jira keys; `xr-*` SDLC not yet ported — dispatch generically for now | — |
 | **bestbuy_tools** (bb_tools) | `projects/bestbuy_tools` | tooling repo — **rebase-only, no PR, no merge** (see below); remote is **`bb_tools`**, not `origin`; houses BBDClient / testbed / crossroads code (see Toolbelt) | — |
 | **kuberist_v2** (kbr) | `projects/kuberist_deployment_configs` | infra-as-code — **rebase + push, no PR, no merge** (see below); base branch **`master`**, remote `origin`; `COS-` Jira keys; **v1 migration still in flight** | — |
-| **super** | `projects/super` | tooling — **Wes's repo** (`westaylor-gravitate/super`), taken **as-is**; our branch `frigate` carries build plumbing only (the overlay half feature-gated so it builds with no cairo/X11 headers). No features added, no PRs opened without the captain — the one exception so far is the `points` route (captain, 2026-09-22), on branch `jira-points` as PR #3 upstream (non-draft, captain 2026-09-22). | — |
+| **super** | `projects/super` | tooling — **Wes's repo** (`westaylor-gravitate/super`), taken **as-is**; our branch `frigate` carries build plumbing only (the overlay half feature-gated so it builds with no cairo/X11 headers). No features added, no PRs opened without the captain — the exceptions so far are the `points` route (PR #3, non-draft) and the `create` route (PR #4, draft, stacked on #3), both captain 2026-09-22. | — |
 | deployment_configs (v1) | `projects/deployment_configs` | config / direct — **superseded by kuberist_v2**, still holds unmigrated envs | — |
 
 Each project has its own lifecycle; AIO's is the mature one. **When you pick up a ticket, read its
@@ -237,7 +237,7 @@ Two different things the fleet does, don't conflate them:
 | **Burners** (spin / sync / logs) | the **`gravi`** CLI (`gravi burner …`) — works from any cwd |
 | **"Is my push live on the burner yet?"** | **`burner-live <id>`** (`bin/burner-live`, symlinked onto PATH) — waits for the image to promote, nudges autosync, then *proves* the app is serving your sha; exit 0 live / 1 not / 2 CI failed / 3 unusable. Run it **backgrounded** so its exit re-invokes you. Details in the `gravi-burners` skill |
 | **Read a Jira ticket / JQL / a PR + its reviews** | **`super read`** (`super` skill) — `jira://<KEY>` (description **+ Acceptance Criteria** + comments, screenshots downloaded to `/tmp/jira-images/<KEY>/`), `jira://<KEY>/{children,status,desc,ac,points}`, `jql://<urlencoded>` (TOON table), `pr://<n>{,/reviews,/reviews/<i>,/diff}`, `ruff://<path>`. Batched and parallel: `super read a b c`. **Use this, not the Atlassian MCP, for every Jira read.** |
-| **Write a Jira field, status or estimate** | **`super write`** — `jira://<KEY>/{desc,ac} < markdown` (read it first, keep the `[^unrenderable/N]` markers), `jira://<KEY>/status "<transition>"` (read `/status` first for the exact names), and `jira://<KEY>/points 7` (the Energy Points estimate — the captain's call, never set one unasked) |
+| **Write a Jira field, status or estimate** | **`super write`** — `jira://<KEY>/{desc,ac} < markdown` (read it first, keep the `[^unrenderable/N]` markers), `jira://<KEY>/status "<transition>"` (read `/status` first for the exact names), and `jira://<KEY>/points 7` (the Energy Points estimate — the captain's call, never set one unasked). **Create an issue** with `jira://<PROJECT>/create < front-matter.md` — only when the captain asks for one |
 | **Jira comments** | the Atlassian **MCP** — the one thing `super` cannot do. Test-coverage comments only (see the Jira-comments rule below) |
 | **Sentry / Grafana** | the Sentry / Grafana **MCPs** — ambient to any agent |
 
@@ -699,7 +699,7 @@ Installs land in `.claude/skills/<name>/` and are tracked in `skills-lock.json`.
 - `snd-brief` — the mate's dispatch skill (worktree setup + launch the crew on `snd-sdlc` + supervise).
   The SDLC skills themselves (`snd-sdlc`, `snd-kickoff`, `snd-jira`, `snd-pr`, …) are crew-side in the SND repo.
 - `super` — the `super read` / `super write` CLI: Jira tickets (with AC + screenshots), JQL, PRs and
-  their reviews, ruff format diffs, and Jira desc/AC/status/points writes. Symlinked into `~/.claude/skills/`
+  their reviews, ruff format diffs, and Jira desc/AC/status/points writes plus issue create. Symlinked into `~/.claude/skills/`
   so every crewmate loads it. Replaces the Atlassian MCP for reads; comments stay on the MCP.
 - `snd-qa-bugs` — QA bug intake: sweep Jira for bug subtasks on board tickets, triage, put the existing
   crew on them, and drive the bug + parent status track. Runs on the heartbeat and at boot.
