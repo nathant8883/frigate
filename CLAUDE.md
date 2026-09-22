@@ -160,6 +160,7 @@ announcing edits. The tagged lines come at the end, not along the way.
 | **crossroads** (XR) | `projects/crossroads` | product — base branch **`test`** (its RC); `XR-` Jira keys; `xr-*` SDLC not yet ported — dispatch generically for now | — |
 | **bestbuy_tools** (bb_tools) | `projects/bestbuy_tools` | tooling repo — **rebase-only, no PR, no merge** (see below); remote is **`bb_tools`**, not `origin`; houses BBDClient / testbed / crossroads code (see Toolbelt) | — |
 | **kuberist_v2** (kbr) | `projects/kuberist_deployment_configs` | infra-as-code — **rebase + push, no PR, no merge** (see below); base branch **`master`**, remote `origin`; `COS-` Jira keys; **v1 migration still in flight** | — |
+| **super** | `projects/super` | tooling — **Wes's repo** (`westaylor-gravitate/super`), taken **as-is**; our branch `frigate` carries build plumbing only (the overlay half feature-gated so it builds with no cairo/X11 headers). No features added, no PRs opened without the captain — the one exception so far is the `points` route (captain, 2026-09-22), on branch `jira-points` as draft PR #3 upstream. | — |
 | deployment_configs (v1) | `projects/deployment_configs` | config / direct — **superseded by kuberist_v2**, still holds unmigrated envs | — |
 
 Each project has its own lifecycle; AIO's is the mature one. **When you pick up a ticket, read its
@@ -235,7 +236,10 @@ Two different things the fleet does, don't conflate them:
 | **Reach a database** | configured envs (dev/test/prod clients) → **BBDClient** (`bbdclient` skill), invoked from anywhere via `uv run --directory projects/bestbuy_tools python …` → `BBDClient.from_config("<dev>")` / `from_mom("<client>")` → `client.db.<database>.<collection>`. **Burner / instance DBs** → the **`gravi`** CLI (fetches the conn / queries directly, no tunnel). Raw connection string → the mongodb MCP. Creds in `bestbuy_tools/.env`. |
 | **Burners** (spin / sync / logs) | the **`gravi`** CLI (`gravi burner …`) — works from any cwd |
 | **"Is my push live on the burner yet?"** | **`burner-live <id>`** (`bin/burner-live`, symlinked onto PATH) — waits for the image to promote, nudges autosync, then *proves* the app is serving your sha; exit 0 live / 1 not / 2 CI failed / 3 unusable. Run it **backgrounded** so its exit re-invokes you. Details in the `gravi-burners` skill |
-| **Jira / Sentry / Grafana** | the Atlassian / Sentry / Grafana **MCPs** — ambient to any agent |
+| **Read a Jira ticket / JQL / a PR + its reviews** | **`super read`** (`super` skill) — `jira://<KEY>` (description **+ Acceptance Criteria** + comments, screenshots downloaded to `/tmp/jira-images/<KEY>/`), `jira://<KEY>/{children,status,desc,ac,points}`, `jql://<urlencoded>` (TOON table), `pr://<n>{,/reviews,/reviews/<i>,/diff}`, `ruff://<path>`. Batched and parallel: `super read a b c`. **Use this, not the Atlassian MCP, for every Jira read.** |
+| **Write a Jira field, status or estimate** | **`super write`** — `jira://<KEY>/{desc,ac} < markdown` (read it first, keep the `[^unrenderable/N]` markers), `jira://<KEY>/status "<transition>"` (read `/status` first for the exact names), and `jira://<KEY>/points 7` (the Energy Points estimate — the captain's call, never set one unasked) |
+| **Jira comments** | the Atlassian **MCP** — the one thing `super` cannot do. Test-coverage comments only (see the Jira-comments rule below) |
+| **Sentry / Grafana** | the Sentry / Grafana **MCPs** — ambient to any agent |
 
 **Burner default — skip the forecast (currently NOT operator-reachable).** Ideally, when spinning a fleet
 burner we'd skip the **forecast / actor-setup** phase (manifold sync + forecasting is slow seed-time work we
@@ -264,10 +268,11 @@ schema before querying by id.
 
 **How crewmates carry it:** capability skills are meant to sit in **global scope** (`~/.claude/skills`) so
 every crewmate loads them regardless of cwd — **`data-access`** (the router above), plus **`gravi-cli`** /
-**`gravi-burners`** (symlinked from frigate, so they stay version-controlled here). **On this box that
-directory does not exist**, so nothing global reaches a crew: until it's stood up, `snd-brief` symlinks
-`gravi-cli` + `gravi-burners` into each worktree at dispatch, and a crew that was booted before that
-change has neither — check `ls <worktree>/.claude/skills` rather than assuming. The authoritative
+**`gravi-burners`** / **`super`** (symlinked from frigate, so they stay version-controlled here).
+**That directory now exists** (2026-09-18) and **`super` is symlinked into it**, so a crewmate should
+load it from any cwd; `gravi-cli` / `gravi-burners` are not there yet and `data-access` is still
+unwritten. `snd-brief` symlinks all three into each worktree at dispatch regardless, and a crew booted
+before a skill landed has none of it — check `ls <worktree>/.claude/skills` rather than assuming. The authoritative
 `bbdclient` API skill stays team-tracked in bb_tools; `data-access` points at it. This is the
 **opposite** of project skills (which stay local to their repo) — capability skills are cross-cutting,
 so global is correct. (The `bb_tools/mcp/bbd_client_server.py` MCP is a **defunct prototype** — don't
@@ -584,6 +589,21 @@ exists (recreate on the worktree if not) and re-provision crew skills (an earlie
 provisioned what existed *then*). `snd-brief` does these checks before every dispatch — that's where the
 mechanics live.
 
+### Fleet tooling is briefed at dispatch, never patched into a project's SDLC skills (captain, 2026-09-18)
+
+When the fleet adopts a tool — `super`, `gravi`, `burner-live`, whatever comes next — the instruction to
+use it lands at **frigate level**: the `snd-brief` dispatch brief, this manual, and the capability skill.
+It does **not** get edited into the project's `snd-*` SDLC skills.
+
+Those skills live in each worktree as untracked copies with **no canonical upstream** — five live crews
+carry five identical directories and nothing owns them. Editing a tool change into them means five edits
+under five running crews, they drift the moment one is touched, and the change is invisible to the next
+worktree created. The brief, by contrast, is written fresh at every dispatch from one file you control.
+
+So a project skill naming an older path (`getJiraIssue`, hand-rolled `gh api`) is **not a bug to fix in
+the repo** — the brief says which interface wins, and the brief is the authority. Say so explicitly in the
+brief ("this overrides what the `snd-*` skills say"), because the crew is reading both.
+
 ## Skill placement (mate vs crew)
 
 Skills resolve from the running agent's cwd. The mate runs at `cwd=frigate`; crewmates at
@@ -678,6 +698,9 @@ Installs land in `.claude/skills/<name>/` and are tracked in `skills-lock.json`.
 - `gravi-burners` — `gravi burner` lifecycle (start / autosync / recreate / restart / logs / pods …).
 - `snd-brief` — the mate's dispatch skill (worktree setup + launch the crew on `snd-sdlc` + supervise).
   The SDLC skills themselves (`snd-sdlc`, `snd-kickoff`, `snd-jira`, `snd-pr`, …) are crew-side in the SND repo.
+- `super` — the `super read` / `super write` CLI: Jira tickets (with AC + screenshots), JQL, PRs and
+  their reviews, ruff format diffs, and Jira desc/AC/status/points writes. Symlinked into `~/.claude/skills/`
+  so every crewmate loads it. Replaces the Atlassian MCP for reads; comments stay on the MCP.
 - `snd-qa-bugs` — QA bug intake: sweep Jira for bug subtasks on board tickets, triage, put the existing
   crew on them, and drive the bug + parent status track. Runs on the heartbeat and at boot.
 
