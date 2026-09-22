@@ -135,7 +135,7 @@ sits — the plumbing would ride along.
    commit is feature-only. Verify the final `git diff --stat` before committing.
 4. Draft PR to `master`. Non-draft stays the captain's gate.
 
-First one through this path: **draft PR #3**, branch `jira-points`.
+First one through this path: **PR #3**, branch `jira-points`.
 
 ## Phase 3 (original) — not taken (captain, 2026-09-18)
 
