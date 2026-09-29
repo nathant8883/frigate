@@ -59,18 +59,20 @@ for d in <repo>/.claude/skills/*/; do name=$(basename "$d")
   ln -sfn "$d" "<worktree>/.claude/skills/$name"; done
 ```
 
-**Also provision the capability skills the crew can't otherwise see.** `gravi-burners` / `gravi-cli`
-live in **frigate**, and a crewmate at `cwd=<worktree>` loads neither (`~/.claude/skills/` doesn't
-exist on this box, whatever `CLAUDE.md` implies). Left out, a crew improvises the burner loop from
-memory — which is exactly how "is it live yet?" turns into a 20-minute guessing game:
+**Also provision the capability skills the crew can't otherwise see.** `gravi-burners` / `gravi-cli` /
+`super` live in **frigate**. They are now also symlinked user-scope into `~/.claude/skills/` (that
+directory exists as of 2026-09-18), so a crewmate should load them from any cwd — symlink them into the
+worktree anyway, belt and braces, because a crew booted before a skill landed has neither. Left out, a
+crew improvises the burner loop from memory — which is exactly how "is it live yet?" turns into a
+20-minute guessing game — and reads tickets through the MCP, missing the Acceptance Criteria:
 
 ```bash
-for name in gravi-burners gravi-cli; do
+for name in gravi-burners gravi-cli super; do
   ln -sfn "/home/nturner/frigate/.claude/skills/$name" "<worktree>/.claude/skills/$name"; done
 ```
 
 Verify `ls <worktree>/.claude/skills` shows the pipeline: `snd-sdlc`, `snd-kickoff`, `snd-housekeeping`,
-`snd-testing`, `snd-pr`, `snd-jira`, `snd-merge-check` — plus `gravi-burners`, `gravi-cli`. (Once the
+`snd-testing`, `snd-pr`, `snd-jira`, `snd-merge-check` — plus `gravi-burners`, `gravi-cli`, `super`. (Once the
 bundle is graduated to the team repo, the first loop is unnecessary — those skills are in the checkout.)
 
 ## 2. Compose the brief (thin — the SDLC lives in the repo)
@@ -90,8 +92,47 @@ here; don't touch other worktrees or the main checkout. Drive this ticket with t
 draft PR + Ready for Review**. **Never open a non-draft PR** — that's the captain's call.
 
 **You start in plan mode — design first.** Your very first job is to read the ticket + the relevant code
-and **present an implementation plan** (ExitPlanMode). That's the design gate: I review/approve it before
-you build. Don't create the branch or move Jira until it's approved — `snd-kickoff` walks you through it.
+and **present an implementation plan** (ExitPlanMode).
+
+**Read the WHOLE ticket, not the description** — and read it with **`super`**, not the Atlassian MCP:
+
+```bash
+super read jira://KB-XXXXX jira://KB-XXXXX/children
+```
+
+One call, both in parallel. `jira://<KEY>` gives you the description **and the Acceptance Criteria**
+(`customfield_10110`) rendered to markdown, plus any pasted screenshots downloaded to
+`/tmp/jira-images/<KEY>/` — `Read` those, a design or QA ticket is often mostly screenshot.
+`/children` gives the subtasks. The description is usually one sentence of context; the numbered
+requirements you'll be graded on are in the AC and the subtasks. Crews on this board have repeatedly
+built the wrong thing by reading description-only. **Skip the comments** — they're noise, not spec.
+Open your plan with a line naming what you read (`read: description + AC (N items) + subtasks`).
+That's the design gate: I review/approve it before you build. Don't create the branch or move Jira
+until it's approved — `snd-kickoff` walks you through it.
+
+**`super` is the interface for Jira, PRs and format checks — it overrides what the `snd-*` skills say.**
+Those skills still name `getJiraIssue` and hand-rolled `gh`; ignore that, use these:
+
+- `super read jira://<KEY>/status` then `super write jira://<KEY>/status "<transition>"` — read first,
+  the available names differ by issue type and state.
+- `super read jira://<KEY>/{desc,ac}` → edit → `super write jira://<KEY>/<field> < file` — **keep every
+  `[^unrenderable/N]` marker**; they splice the original images/panels back on write.
+- `super read pr://<n>` · `pr://<n>/reviews` · `pr://<n>/reviews/<i>` · `pr://<n>/diff` — run it from
+  your worktree; cwd is how `gh` finds the repo.
+- `super read ruff://<path> ruff://<path>` — read-only format diff; apply hunks by hand with Edit,
+  never run `ruff format` in place and **never** `--unsafe-fixes`.
+- Missing `Dev`/`Validate` subtasks: create each bare with `type: Internal Sub-task`, `parent: KB-XXXXX`
+  via `super write jira://KB/create`, one bare call per subtask (no loop/`timeout` wrapper). Assign `Dev`
+  to the captain with the MCP `editJiraIssue`; leave `Validate` unassigned unless he names a validator.
+- **Comments are the one thing `super` can't do** — the coverage comment still goes through the
+  Atlassian MCP, and that comment is still the only one you may post.
+- Don't memorize routes: `super read` lists the schemes, `super read <scheme>://` lists its routes.
+  The `super` skill in your `.claude/skills` has the detail.
+
+**Write almost no comments — and no docstrings to dodge that.** One line max for a comment, **two lines
+of prose max for a docstring** (Python and TS alike, no `Args:`/`Returns:`/`@param` sections), at most
+three comments-or-docstrings in the whole PR, and zero is the normal number. Housekeeping enforces it on
+the diff; don't make it clean up after you.
 
 **Report — one phase per turn, FLEET STATUS.** I'm the **mate**, watching you through herdr, not a human at
 a keyboard. Do **one phase, then end your turn** on a FLEET STATUS block (as `snd-sdlc` directs) so herdr

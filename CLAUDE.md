@@ -237,21 +237,14 @@ Two different things the fleet does, don't conflate them:
 | **Burners** (spin / sync / logs) | the **`gravi`** CLI (`gravi burner …`) — works from any cwd |
 | **"Is my push live on the burner yet?"** | **`burner-live <id>`** (`bin/burner-live`, symlinked onto PATH) — waits for the image to promote, nudges autosync, then *proves* the app is serving your sha; exit 0 live / 1 not / 2 CI failed / 3 unusable. Run it **backgrounded** so its exit re-invokes you. Details in the `gravi-burners` skill |
 | **Read a Jira ticket / JQL / a PR + its reviews** | **`super read`** (`super` skill) — `jira://<KEY>` (description **+ Acceptance Criteria** + comments, screenshots downloaded to `/tmp/jira-images/<KEY>/`), `jira://<KEY>/{children,status,desc,ac,points}`, `jql://<urlencoded>` (TOON table), `pr://<n>{,/reviews,/reviews/<i>,/diff}`, `ruff://<path>`. Batched and parallel: `super read a b c`. **Use this, not the Atlassian MCP, for every Jira read.** |
-| **Write a Jira field, status or estimate** | **`super write`** — `jira://<KEY>/{desc,ac} < markdown` (read it first, keep the `[^unrenderable/N]` markers), `jira://<KEY>/status "<transition>"` (read `/status` first for the exact names), and `jira://<KEY>/points 7` (the Energy Points estimate — the captain's call, never set one unasked). **Create an issue** with `jira://<PROJECT>/create < front-matter.md` — only when the captain asks for one |
+| **Write a Jira field, status or estimate** | **`super write`** — `jira://<KEY>/{desc,ac} < markdown` (read it first, keep the `[^unrenderable/N]` markers), `jira://<KEY>/status "<transition>"` (read `/status` first for the exact names), and `jira://<KEY>/points 7` (the Energy Points estimate — the captain's call, never set one unasked). **Create an issue** with `jira://<PROJECT>/create < front-matter.md` — only when the captain asks for one. **Dev/Validate subtasks** are the exception: they're the readiness gate, not new tickets — `type: Internal Sub-task`, `parent: <story>`, then assign via the MCP `editJiraIssue` (recipe in the `super` skill). Run `super write` bare; a `cd`/loop/`timeout` wrapper isn't covered by the `Bash(super write:*)` allow rule |
 | **Jira comments** | the Atlassian **MCP** — the one thing `super` cannot do. Test-coverage comments only (see the Jira-comments rule below) |
 | **Sentry / Grafana** | the Sentry / Grafana **MCPs** — ambient to any agent |
 
-**Burner default — skip the forecast (currently NOT operator-reachable).** Ideally, when spinning a fleet
-burner we'd skip the **forecast / actor-setup** phase (manifold sync + forecasting is slow seed-time work we
-rarely need for review/QA). **But there is no operator path to skip it today.** The `--no-actors` /
-`--skip-steps` flags exist only in the bb_tools burner *library* (`projects/bestbuy_tools/burner/burner/cli.py`),
-and that CLI has been **removed as a user path** (`bestbuy_tools/burner/CLAUDE.md`: "The legacy `python -m
-burner …` CLI has been removed"; `core.py`/`utils/*` are now import-only, driven by the mom burner worker —
-running the cli directly diverges from the web UI and isn't supported). The supported operator path is
-**`gravi burner start`**, which exposes **no** forecast-skip flag — so **every `gravi burner start` runs the
-forecast**; budget the extra couple minutes. **TODO (real gap): expose a `--skip-forecast`/`--no-actors`
-passthrough on `gravi burner start`** (the mom `/burners/*` endpoint already supports `no_actors`; it just
-isn't surfaced on the CLI). Until then, don't chase the removed bb_tools CLI — just accept the forecast.
+**Burner default — skip the forecast.** When spinning a fleet burner for review, QA or a bug repro, pass
+**`gravi burner start --skip-forecast`**. It skips the forecast and actor-setup phase (manifold sync plus
+forecasting), which is slow seed-time work we rarely need. Found on the CLI 2026-09-28; this used to be
+documented as missing.
 
 **Burner liveness — one message, when it's actually live.** The fix → push → burner loop is the fleet's
 most-repeated cycle and the one that gets babysat worst: `autosync trigger` returns instantly, CI's green
@@ -269,8 +262,8 @@ schema before querying by id.
 **How crewmates carry it:** capability skills are meant to sit in **global scope** (`~/.claude/skills`) so
 every crewmate loads them regardless of cwd — **`data-access`** (the router above), plus **`gravi-cli`** /
 **`gravi-burners`** / **`super`** (symlinked from frigate, so they stay version-controlled here).
-**That directory now exists** (2026-09-18) and **`super` is symlinked into it**, so a crewmate should
-load it from any cwd; `gravi-cli` / `gravi-burners` are not there yet and `data-access` is still
+**That directory now exists** (2026-09-18). **`super`, `gravi-cli` and `gravi-burners` are symlinked
+into it** (the last two since 2026-09-29), so a crewmate loads them from any cwd; `data-access` is still
 unwritten. `snd-brief` symlinks all three into each worktree at dispatch regardless, and a crew booted
 before a skill landed has none of it — check `ls <worktree>/.claude/skills` rather than assuming. The authoritative
 `bbdclient` API skill stays team-tracked in bb_tools; `data-access` points at it. This is the
@@ -419,8 +412,7 @@ detection is yours: the **`snd-qa-bugs`** skill sweeps for them and drives the i
   is up is lost silently. Jira is the durable queue — a JQL sweep re-derives complete truth every run.
   Volume is ~1–2/day, so ≤20-min detection is already faster than the captain noticing.
 - **Triage is hybrid** (captain, 2026-08-07). Auto-dispatch a bug that's plainly a regression in the
-  surface *that crew changed*; escalate anything unclear — hands-off areas (OrderMovements), another
-  ticket's surface, an AC/design question dressed as a bug, perf/security, or a merged parent.
+  surface *that crew changed*; escalate anything unclear — another ticket's surface, an AC/design question dressed as a bug, perf/security, or a merged parent.
 - **Dispatch into the existing crew, not a new worktree.** Panes and worktrees survive completion, so the
   bug goes to the crewmate that already holds the branch and the context.
 - **A bug fix still gets a mini housekeeping** — a light pass, not the full ceremony, but the rules aren't
@@ -657,6 +649,12 @@ Worth using, added since the manual was written:
   worktrees survive, the agents don't, so `agent start … -- --continue` relaunches each crewmate with its
   prior session restored (context intact — check `~/.claude/projects/<slugged-worktree>/` for a resumable
   session first). Verified 2026-08-18: all six in-flight crews came back with their last FLEET STATUS.
+  **This is now the fallback, not the path.** herdr restores Claude agents itself (`claude --resume <id>`
+  on restart) — but only for panes whose session id was reported by the **herdr Claude integration**, a
+  `SessionStart` hook in `~/.claude/settings.json`. It was never installed until 2026-09-23, which is why
+  every restart came back as bare shells. Check `herdr integration status | grep claude` says `current`;
+  if not, `herdr integration install claude`. A crew started before the hook existed has no reference
+  until its next start/resume/compact, and `agent start` stays the fix for those.
 - `herdr pane process-info` takes **`--pane <id>`**, not a positional — the positional form exits non-zero
   with `unknown option`.
 - `herdr api snapshot` (live session state) · `herdr notification show` · `herdr integration`.

@@ -62,6 +62,19 @@ super write jira://KB/create < new.md            # KB-52256: created Story under
   `summary` (required), `type` (default `Story`), `parent` (optional epic); the description is the
   markdown below the closing `---`. Set the AC afterwards with `/ac`. **Only the captain creates
   tickets** — the route is for carrying out his ask, never for proposing or filing one yourself.
+- **Dev / Validate subtasks** — the AIO readiness gate wants exactly two, bare (summary only). The
+  issue type is **`Internal Sub-task`** (`Subtask`, `Sub-task` and `Sub-Task` all 400 "Specify a valid
+  issue type"), and `parent` is the **story key**, not the epic:
+  ```bash
+  printf -- '---\nsummary: Dev\ntype: Internal Sub-task\nparent: KB-1\n---\n' | super write jira://KB/create
+  printf -- '---\nsummary: Validate\ntype: Internal Sub-task\nparent: KB-1\n---\n' | super write jira://KB/create
+  ```
+  `create` has no assignee field, so set the assignee afterwards with the Atlassian MCP
+  `editJiraIssue` (`{"assignee": {"accountId": "<id>"}}`; `lookupJiraAccountId` finds the id). `Dev`
+  goes to whoever did the work; `Validate` goes to the validator the captain names and **never** to the
+  dev. Unnamed means leave `Validate` unassigned.
+- **Run each `super write` as its own bare command** — no `cd …;`, loop, or `timeout` in front. The
+  allow rule `Bash(super write:*)` is a prefix match, so a wrapped call isn't covered by it.
 - **Energy Points is the estimate field** — `points` takes a bare number and resolves the
   custom field by name, so nothing is pinned to a `customfield_*` id. Estimates are the
   captain's call; never set one on your own initiative.

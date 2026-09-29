@@ -2,31 +2,47 @@
 
 Phases: Plan Build House Test Review Valid Merge Ship  (●done ◉now ○todo)
 
- Crew     Ticket            Summary                                Project  Phase            Status
+ Crew     Ticket                                Summary               Project   Phase            Status
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Foxtrot  KB-48819          Auto load volumes on assign (TW)       snd_aio  ●●●◉○○○○ Test    🔴 feedback
-   ↳ In Progress                                                            ↳ shift leak blocks green
+ Victor   KB-51809                              Recalc re-adding an…  snd_aio   ◉○○○○○○○ Plan    🔴 feedback
+                                                                                ↳ plan gate
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Alpha    KB-48925          Compartment products (TW)              snd_aio  ●●●●◉○○○ Review  🔴 feedback
-   ↳ Ready for Review                                                       ↳ #1581 · RC merge
+ Echo     KB-49795                              Freight txn safety    snd_aio   ●●●◉○○○○ Test    🔴 feedback
+   ↳ In Progress                                                                ↳ draft #1555 green
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Echo     KB-49795          Freight txn safety                     snd_aio  ●●●●◉○○○ Review  📜 captain review
-   ↳ In Progress                                                            ↳ draft #1555
+ Charlie  KB-48976                              Reject rounding (fl…  snd_aio   ●●●●◉○○○ Review  🔴 feedback
+   ↳ In Progress                                                                ↳ draft #2150
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Hotel    KB-49849          Turn ETA / route details               snd_aio  ●●●●◉○○○ Review  📜 captain review
-   ↳ In Progress                                                            ↳ vent · staged
+ Charlie  KB-48976                              Accessorial rejecti…  snd_aio   ●●●●◉○○○ Review  🔴 feedback
+   ↳ In Progress                                                                ↳ draft #2150
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Charlie  KB-49995          Carrier alloc columns                  snd_aio  ●●●●◉○○○ Review  📜 captain review
-   ↳ In Progress                                                            ↳ rig · ready
+ Sierra   KB-49466                              Depot rename doesn'…  snd_aio   ●●●●◉○○○ Review  🟡 idle
+   ↳ In Progress                                                                ↳ #2113 green
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
- Golf     fleet-board-wrap  Board text wrapping                    frigate  ●●●●●●●◉ Ship    🟡 idle
-                                                                            ↳ committed
+ Zulu     KB-49635                              Auto-sequence TW tu…  snd_aio   ●●●●◉○○○ Review  🟡 idle
+   ↳ In Progress                                                                ↳ draft #2142
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Upsilon  KB-52109                              Blocking TW flags s…  snd_aio   ●●●●◉○○○ Review  🟡 idle
+   ↳ Ready for Review                                                           ↳ #2143
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Alpha    KB-52256                              TW Order Movements …  snd_aio   ●●●●●●◉○ Merge   🟡 idle
+   ↳ Ready for Review                                                           ↳ #2078 · burner ethanol
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Bravo    agent-ticket-flow                     MOM agent ticket fl…  bb_tools  ●●●●●●●◉ Ship    🟡 idle
+                                                                                ↳ mom 8c1c9b806
+ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Omega    loves-test-scout-off + demo-scout-on  Turn off Scout in l…  kbr       ●●●●●●●◉ Ship    🟡 idle
+                                                                                ↳ demo Scout live (Super User)
  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
 ## Needs feedback — captain
 
-❓ **Alpha · KB-48925** — pre-trip writes equipment numbers without ids — leave Alpha's read-time fallback as
-   the fix, or also capture ids at the source?
+❓ **Echo · KB-49795** — E2E covers the invoice surface where the change lives; cover the other freight
+   datasets too (a burner each), or is that enough?
 
-❓ **Foxtrot · KB-48819** — E2E repeatability needs shared-suite surgery (seed_shift leaks all 8 shifts per
-   run) — spend a third cycle, or stop with both approved fixes and write it up?
+🔴 **Victor · KB-51809** — fix: on recalc, reject open SPRs whose FLI is gone (flag paid ones out-of-sync).
+   Approve? And one-off cleanup of existing open dupes, or let next recalc clean them?
+
+❓ **Charlie · KB-48976** — Paused: captain verifying mom; keep draft #2150 as is?
+
+❓ **Charlie · KB-48976** — Paused: captain verifying mom; keep draft #2150 as is?

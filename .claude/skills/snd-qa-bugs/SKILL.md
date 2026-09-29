@@ -91,12 +91,10 @@ The captain's review stays in the loop only where it earns its keep.
   the JQL carried it;
 - the parent is an in-flight item, not already merged;
 - the crew's pane is alive (`herdr agent list`);
-- the bug is plainly a regression in the surface *that crew changed*;
-- it touches no hands-off area.
+- the bug is plainly a regression in the surface *that crew changed*.
 
 **Escalate to the captain** when *any* hold:
 - it is **unassigned** — probably ours, but nobody has said so; ask before claiming it;
-- it touches **OrderMovements** — hands-off: no fixes, no follow-up tickets, no neighbour sweeps;
 - it spans another ticket's surface, or belongs to a different story;
 - it's an AC or design question dressed as a bug;
 - it raises a perf or security concern;
