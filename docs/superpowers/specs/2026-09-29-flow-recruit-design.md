@@ -70,9 +70,13 @@ returning 502s, and they aren't there to limit how much someone can use the tool
 - Each instance has its own **internal integration** token with `event:read`, `project:read` and
   `org:read`. The proxy offers no write, resolve or assign actions.
 
-**Credential storage.** The Grafana service-account token and the two Sentry integration tokens live
-in Google Secret Manager. Kuberist's `sync-secrets.py` syncs them into mom's environment. Rotating a
-token means changing it in Secret Manager. Creating them is a one-time admin setup.
+**Credential storage.** Each token is its own API Credential item in the 1Password vault `gcp dev`:
+`mom-grafana-service-token`, `mom-sentry-hosted-token` and `mom-sentry-self-hosted-token`, each with its
+value in the `credential` field. The 1Password operator syncs each item into a Kubernetes Secret with
+the same name (a `OnePasswordItem` CR in `clusters/dev/mom/`). `backend.yaml` reads each one with
+`secretKeyRef` (`optional: true`), exposing them as `MOM_GRAFANA_SERVICE_TOKEN`, `MOM_SENTRY_HOSTED_TOKEN`
+and `MOM_SENTRY_SELF_HOSTED_TOKEN`. `MOM_GRAFANA_URL` goes in mom's configmap. Rotating a token means
+updating its 1Password item. Creating the tokens is a one-time admin job.
 
 **Audit.** Every call is logged with the caller, the env, the route, the query or issue, the rows
 returned and the time taken.
