@@ -25,7 +25,7 @@ or exactly what's missing and how to fix it. Then Claude starts on tickets witho
 | Stop conditions | `--count`, `--minutes`, or an empty queue, whichever comes first; `--parallel` caps concurrency | Wanted as experiment knobs |
 | Tool access | CLIs, not MCPs: `super` for Jira, and `gravi-axi` for Loki and Sentry through a mom proxy | One login, and access granted by role, not per-person tokens |
 | Observability credentials | Held only by mom, as service credentials | Teammates never hold Sentry or Grafana tokens |
-| Access limits | Per-user environment scoping and usage quotas on the proxy | Prod logs and events can contain customer data |
+| Access limits | Per-user environment scoping on the proxy; no usage limits until they're needed | Prod logs and events can contain customer data; limits would only get in the way of experiments |
 
 ## Components
 
@@ -46,13 +46,9 @@ without flow access and revoked on its own.
 A request for an environment outside the caller's scope is refused with 403, and the response names the
 missing grant.
 
-**Usage limits** apply to each user and are configurable by an admin:
-
-- **Rate:** requests per minute; the default is 30.
-- **Daily quota:** queries per day; the default is 500. Log lines returned per day; the default is
-  50,000.
-- A request over a limit gets a 429 carrying `Retry-After` and the limit that was hit. The CLI shows
-  both.
+**No usage limits for now.** There's no per-user rate limit and no quota; we'll add them only if the
+audit log shows a problem. Per-request caps (the window and line limits below) stay. They keep Loki from
+returning 502s, and they aren't there to limit how much someone can use the tools.
 
 **Loki routes:**
 
@@ -92,7 +88,7 @@ gravi-axi sentry issue BEST_BUY_SERVICES-1GXC
 gravi-axi sentry search <env> '<query>' [--since 14d]
 ```
 
-A 403 prints the grant that's missing. A 429 prints the limit and the retry time.
+A 403 prints the grant that's missing.
 
 ### 3. `gravi-axi flow doctor [estimate|triage]` (CLI)
 
@@ -149,7 +145,7 @@ Rules for the lead:
 
 - The lead never reads ticket content or reports. It passes keys only, so no context crosses from one
   ticket to another.
-- Rate limits: exit 5 means wait and retry, as the gate skills already do. The lead also spreads
+- Mom's existing API rate limit: exit 5 means wait and retry, as the gate skills already do. The lead also spreads
   claims out, starting at most one every few seconds.
 - A subagent that fails its run is counted and reported. The lead doesn't retry it; the ticket goes back
   in the queue.
@@ -182,7 +178,7 @@ The dialog only displays text; nothing runs from the browser.
 
 - **Doctor** checks don't depend on each other: one failed check never hides the others.
 - **Recruit** exits non-zero with doctor's output when the gate is blocked.
-- **The proxy** returns 403 (scope, with the missing grant named), 429 (limit, `Retry-After`), 422
+- **The proxy** returns 403 (scope, with the missing grant named), 422
   (a disallowed LogQL selector or window) or 502 (the upstream is down, with the upstream named). The
   CLI prints each in one line.
 - **The lead** survives a subagent failing, and reports it.
@@ -190,8 +186,7 @@ The dialog only displays text; nothing runs from the browser.
 ## Testing
 
 - **Proxy:** unit tests for env→namespace/instance mapping, scope checks (nonprod, a single prod key,
-  prod wildcard, refused), selector injection and rejection, window and line caps, rate and quota
-  limits, and audit writes. Upstream calls are mocked.
+  prod wildcard, refused), selector injection and rejection, window and line caps, and audit writes. Upstream calls are mocked.
 - **CLI:** tests for each command's output and each error mapping; doctor checks run against faked
   command results.
 - **Frontend:** tests for the dialog's command generation and the waiting counts.
