@@ -127,8 +127,8 @@ these. Every Jira write and comment goes out **as the captain** (mom holds his A
   never run `ruff format` in place and **never** `--unsafe-fixes`.
 - Missing `Dev`/`Validate` subtasks: create each bare with `type: Internal Sub-task`, `parent: KB-XXXXX`
   via `gravi-axi jira create KB < file`, one bare call per subtask (no loop/`timeout` wrapper). Assign
-  `Dev` to the captain with the MCP `editJiraIssue`; leave `Validate` unassigned unless he names a
-  validator.
+  `Dev` to the captain with `gravi-axi jira write <subtask>/assignee me`; leave `Validate` unassigned
+  unless he names a validator.
 - **The coverage comment** goes through `gravi-axi jira comment <KEY> < file` (posted as the captain),
   and it is still the only comment you may post.
 - Exit 4 with `jira_not_linked` means the captain's Jira link lapsed — stop and tell me; don't fall

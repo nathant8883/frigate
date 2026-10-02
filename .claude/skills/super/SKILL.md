@@ -44,7 +44,7 @@ Fleet rules on top of the gravi-jira skill:
   file one yourself.
 - **Dev / Validate subtasks:** exactly two, bare, type `Internal Sub-task`, parent = the story.
   `Dev` goes to whoever did the work. `Validate` goes to the validator the captain names and
-  **never** to the dev; if no one is named, leave it unassigned (assign with the Atlassian MCP).
+  **never** to the dev; if no one is named, leave it unassigned (`gravi-axi jira write <KEY>/assignee <email>`).
 - **Energy Points are the captain's call.** Never set one on your own initiative.
 - **One comment per ticket, test coverage only.** `gravi-axi jira comment` posts as the captain,
   so nothing else goes out under his name without his say-so.
