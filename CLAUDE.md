@@ -236,9 +236,10 @@ Two different things the fleet does, don't conflate them:
 | **Reach a database** | configured envs (dev/test/prod clients) → **BBDClient** (`bbdclient` skill), invoked from anywhere via `uv run --directory projects/bestbuy_tools python …` → `BBDClient.from_config("<dev>")` / `from_mom("<client>")` → `client.db.<database>.<collection>`. **Burner / instance DBs** → the **`gravi`** CLI (fetches the conn / queries directly, no tunnel). Raw connection string → the mongodb MCP. Creds in `bestbuy_tools/.env`. |
 | **Burners** (spin / sync / logs) | the **`gravi`** CLI (`gravi burner …`) — works from any cwd |
 | **"Is my push live on the burner yet?"** | **`burner-live <id>`** (`bin/burner-live`, symlinked onto PATH) — waits for the image to promote, nudges autosync, then *proves* the app is serving your sha; exit 0 live / 1 not / 2 CI failed / 3 unusable. Run it **backgrounded** so its exit re-invokes you. Details in the `gravi-burners` skill |
-| **Read a Jira ticket / JQL / a PR + its reviews** | **`super read`** (`super` skill) — `jira://<KEY>` (description **+ Acceptance Criteria** + comments, screenshots downloaded to `/tmp/jira-images/<KEY>/`), `jira://<KEY>/{children,status,desc,ac,points}`, `jql://<urlencoded>` (TOON table), `pr://<n>{,/reviews,/reviews/<i>,/diff}`, `ruff://<path>`. Batched and parallel: `super read a b c`. **Use this, not the Atlassian MCP, for every Jira read.** |
-| **Write a Jira field, status or estimate** | **`super write`** — `jira://<KEY>/{desc,ac} < markdown` (read it first, keep the `[^unrenderable/N]` markers), `jira://<KEY>/status "<transition>"` (read `/status` first for the exact names), and `jira://<KEY>/points 7` (the Energy Points estimate — the captain's call, never set one unasked). **Create an issue** with `jira://<PROJECT>/create < front-matter.md` — only when the captain asks for one. **Dev/Validate subtasks** are the exception: they're the readiness gate, not new tickets — `type: Internal Sub-task`, `parent: <story>`, then assign via the MCP `editJiraIssue` (recipe in the `super` skill). Run `super write` bare; a `cd`/loop/`timeout` wrapper isn't covered by the `Bash(super write:*)` allow rule |
-| **Jira comments** | the Atlassian **MCP** — the one thing `super` cannot do. Test-coverage comments only (see the Jira-comments rule below) |
+| **Read a Jira ticket / JQL** | **`gravi-axi jira`** (`gravi-jira` skill) — acts as the captain through mom's Atlassian OAuth link. `read <KEY>` (description **+ Acceptance Criteria**, screenshots downloaded to `/tmp/jira-images/<KEY>/`), `read <KEY>/{all,children,links,comments,status,desc,ac,points}`, `jql '<plain JQL>'` (TOON table). One route per call; chain with `&&`. **Use this, not the Atlassian MCP, for every Jira read.** Exit 4 `jira_not_linked` = the captain's link lapsed; he runs `gravi-axi jira login`. |
+| **Read a PR + its reviews, or a format diff** | **`super read`** (`super` skill) — `pr://<n>{,/reviews,/reviews/<i>,/diff}`, `ruff://<path>`. Batched and parallel: `super read a b c`. |
+| **Write a Jira field, status or estimate** | **`gravi-axi jira write`** — `<KEY>/{desc,ac} < markdown` (read it right before, keep the `[^unrenderable/N]` markers; exit 7 = the ticket changed since your read), `<KEY>/status "<transition>"` (read `/status` first for the exact names), and `<KEY>/points 7` (the Energy Points estimate — the captain's call, never set one unasked). **Create an issue** with `gravi-axi jira create <PROJECT> < front-matter.md` — only when the captain asks for one. **Dev/Validate subtasks** are the exception: they're the readiness gate, not new tickets — `type: Internal Sub-task`, `parent: <story>`, then assign via the MCP `editJiraIssue` (recipe in the `gravi-jira` and `super` skills). Every write is authored by the captain. Run each write bare; a `cd`/loop/`timeout` wrapper won't match a prefix allow rule |
+| **Jira comments** | **`gravi-axi jira comment <KEY> < file`** — posted as the captain. Test-coverage comments only (see the Jira-comments rule below) |
 | **Sentry / Grafana** | the Sentry / Grafana **MCPs** — ambient to any agent |
 
 **Burner default — skip the forecast.** When spinning a fleet burner for review, QA or a bug repro, pass
@@ -261,10 +262,11 @@ schema before querying by id.
 
 **How crewmates carry it:** capability skills are meant to sit in **global scope** (`~/.claude/skills`) so
 every crewmate loads them regardless of cwd — **`data-access`** (the router above), plus **`gravi-cli`** /
-**`gravi-burners`** / **`super`** (symlinked from frigate, so they stay version-controlled here).
+**`gravi-burners`** / **`gravi-jira`** / **`super`** (symlinked from frigate, so they stay version-controlled here).
 **That directory now exists** (2026-09-18). **`super`, `gravi-cli` and `gravi-burners` are symlinked
-into it** (the last two since 2026-09-29), so a crewmate loads them from any cwd; `data-access` is still
-unwritten. `snd-brief` symlinks all three into each worktree at dispatch regardless, and a crew booted
+into it** (the last two since 2026-09-29; `gravi-jira` installed by `gravi-axi skills install` since
+2026-10-02), so a crewmate loads them from any cwd; `data-access` is still unwritten. `snd-brief`
+symlinks all four into each worktree at dispatch regardless, and a crew booted
 before a skill landed has none of it — check `ls <worktree>/.claude/skills` rather than assuming. The authoritative
 `bbdclient` API skill stays team-tracked in bb_tools; `data-access` points at it. This is the
 **opposite** of project skills (which stay local to their repo) — capability skills are cross-cutting,
@@ -311,6 +313,8 @@ The SDLC itself now lives **in the SND repo** as the `snd-sdlc` orchestrator + t
 
 `snd-jira` authorises **one** comment: the coverage summary from `/post-tests`, plus the E2E yes/no call in
 that thread. That is the entire permission, and it is about **test coverage** — not a licence to narrate.
+It goes out through `gravi-axi jira comment`, which posts **as the captain**, so anything else would be
+words in his mouth.
 
 **Never comment on a ticket with** scope drift, decisions and their rationale, rejected alternatives, what
 the captain ruled, or recommendations. Decisions belong in the **PR body** and in the crew's **FLEET STATUS**
@@ -694,10 +698,12 @@ Installs land in `.claude/skills/<name>/` and are tracked in `skills-lock.json`.
 - `herdr` — `ogulcancelik/herdr` (drive herdr from inside it; gated on `HERDR_ENV=1`).
 - `gravi-cli` — umbrella for the `gravi` CLI; defers burner lifecycle to `gravi-burners`.
 - `gravi-burners` — `gravi burner` lifecycle (start / autosync / recreate / restart / logs / pods …).
+- `gravi-jira` — `gravi-axi jira`: Jira reads, JQL, desc/AC/status/points writes, create and comments, all
+  as the captain via mom's Atlassian OAuth link. Installed by `gravi-axi skills install`; symlinked here.
 - `snd-brief` — the mate's dispatch skill (worktree setup + launch the crew on `snd-sdlc` + supervise).
   The SDLC skills themselves (`snd-sdlc`, `snd-kickoff`, `snd-jira`, `snd-pr`, …) are crew-side in the SND repo.
-- `super` — the `super read` / `super write` CLI: Jira tickets (with AC + screenshots), JQL, PRs and
-  their reviews, ruff format diffs, and Jira desc/AC/status/points writes plus issue create. Symlinked into `~/.claude/skills/`
+- `super` — the `super read` CLI for PRs and their reviews and ruff format diffs, plus the fleet's Jira
+  rules (Jira itself moved to `gravi-jira`). Symlinked into `~/.claude/skills/`
   so every crewmate loads it. Replaces the Atlassian MCP for reads; comments stay on the MCP.
 - `snd-qa-bugs` — QA bug intake: sweep Jira for bug subtasks on board tickets, triage, put the existing
   crew on them, and drive the bug + parent status track. Runs on the heartbeat and at boot.

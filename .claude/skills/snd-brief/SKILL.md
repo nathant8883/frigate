@@ -60,19 +60,20 @@ for d in <repo>/.claude/skills/*/; do name=$(basename "$d")
 ```
 
 **Also provision the capability skills the crew can't otherwise see.** `gravi-burners` / `gravi-cli` /
-`super` live in **frigate**. They are now also symlinked user-scope into `~/.claude/skills/` (that
+`gravi-jira` / `super` live in **frigate**. They are now also symlinked user-scope into `~/.claude/skills/` (that
 directory exists as of 2026-09-18), so a crewmate should load them from any cwd — symlink them into the
 worktree anyway, belt and braces, because a crew booted before a skill landed has neither. Left out, a
 crew improvises the burner loop from memory — which is exactly how "is it live yet?" turns into a
-20-minute guessing game — and reads tickets through the MCP, missing the Acceptance Criteria:
+20-minute guessing game — and reads tickets through the MCP, missing the Acceptance Criteria (and
+posting as nobody in particular instead of as the captain):
 
 ```bash
-for name in gravi-burners gravi-cli super; do
+for name in gravi-burners gravi-cli gravi-jira super; do
   ln -sfn "/home/nturner/frigate/.claude/skills/$name" "<worktree>/.claude/skills/$name"; done
 ```
 
 Verify `ls <worktree>/.claude/skills` shows the pipeline: `snd-sdlc`, `snd-kickoff`, `snd-housekeeping`,
-`snd-testing`, `snd-pr`, `snd-jira`, `snd-merge-check` — plus `gravi-burners`, `gravi-cli`, `super`. (Once the
+`snd-testing`, `snd-pr`, `snd-jira`, `snd-merge-check` — plus `gravi-burners`, `gravi-cli`, `gravi-jira`, `super`. (Once the
 bundle is graduated to the team repo, the first loop is unnecessary — those skills are in the checkout.)
 
 ## 2. Compose the brief (thin — the SDLC lives in the repo)
@@ -94,40 +95,46 @@ draft PR + Ready for Review**. **Never open a non-draft PR** — that's the capt
 **You start in plan mode — design first.** Your very first job is to read the ticket + the relevant code
 and **present an implementation plan** (ExitPlanMode).
 
-**Read the WHOLE ticket, not the description** — and read it with **`super`**, not the Atlassian MCP:
+**Read the WHOLE ticket, not the description** — and read it with **`gravi-axi jira`** (the gravi-jira
+skill), not the Atlassian MCP:
 
 ```bash
-super read jira://KB-XXXXX jira://KB-XXXXX/children
+gravi-axi jira read KB-XXXXX && gravi-axi jira read KB-XXXXX/children
 ```
 
-One call, both in parallel. `jira://<KEY>` gives you the description **and the Acceptance Criteria**
-(`customfield_10110`) rendered to markdown, plus any pasted screenshots downloaded to
-`/tmp/jira-images/<KEY>/` — `Read` those, a design or QA ticket is often mostly screenshot.
-`/children` gives the subtasks. The description is usually one sentence of context; the numbered
-requirements you'll be graded on are in the AC and the subtasks. Crews on this board have repeatedly
-built the wrong thing by reading description-only. **Skip the comments** — they're noise, not spec.
-Open your plan with a line naming what you read (`read: description + AC (N items) + subtasks`).
-That's the design gate: I review/approve it before you build. Don't create the branch or move Jira
-until it's approved — `snd-kickoff` walks you through it.
+`gravi-axi jira read <KEY>` gives you the description **and the Acceptance Criteria** rendered to
+markdown, plus any pasted screenshots downloaded to `/tmp/jira-images/<KEY>/` — `Read` those, a design
+or QA ticket is often mostly screenshot. `/children` gives the subtasks. The description is usually one
+sentence of context; the numbered requirements you'll be graded on are in the AC and the subtasks.
+Crews on this board have repeatedly built the wrong thing by reading description-only. **Skip the
+comments** — they're noise, not spec (that's why this isn't `/all`). Open your plan with a line naming
+what you read (`read: description + AC (N items) + subtasks`). That's the design gate: I review/approve
+it before you build. Don't create the branch or move Jira until it's approved — `snd-kickoff` walks you
+through it.
 
-**`super` is the interface for Jira, PRs and format checks — it overrides what the `snd-*` skills say.**
-Those skills still name `getJiraIssue` and hand-rolled `gh`; ignore that, use these:
+**`gravi-axi jira` is the interface for Jira, and `super` for PRs and format checks — they override what
+the `snd-*` skills say.** Those skills still name `getJiraIssue` and hand-rolled `gh`; ignore that, use
+these. Every Jira write and comment goes out **as the captain** (mom holds his Atlassian link):
 
-- `super read jira://<KEY>/status` then `super write jira://<KEY>/status "<transition>"` — read first,
-  the available names differ by issue type and state.
-- `super read jira://<KEY>/{desc,ac}` → edit → `super write jira://<KEY>/<field> < file` — **keep every
+- `gravi-axi jira read <KEY>/status` then `gravi-axi jira write <KEY>/status "<transition>"` — read
+  first, the available names differ by issue type and state.
+- `gravi-axi jira read <KEY>/desc` (or `/ac`) → edit → `gravi-axi jira write <KEY>/<field> < file` —
+  read right before you write (a write after someone else's change exits 7), and **keep every
   `[^unrenderable/N]` marker**; they splice the original images/panels back on write.
 - `super read pr://<n>` · `pr://<n>/reviews` · `pr://<n>/reviews/<i>` · `pr://<n>/diff` — run it from
   your worktree; cwd is how `gh` finds the repo.
 - `super read ruff://<path> ruff://<path>` — read-only format diff; apply hunks by hand with Edit,
   never run `ruff format` in place and **never** `--unsafe-fixes`.
 - Missing `Dev`/`Validate` subtasks: create each bare with `type: Internal Sub-task`, `parent: KB-XXXXX`
-  via `super write jira://KB/create`, one bare call per subtask (no loop/`timeout` wrapper). Assign `Dev`
-  to the captain with the MCP `editJiraIssue`; leave `Validate` unassigned unless he names a validator.
-- **Comments are the one thing `super` can't do** — the coverage comment still goes through the
-  Atlassian MCP, and that comment is still the only one you may post.
-- Don't memorize routes: `super read` lists the schemes, `super read <scheme>://` lists its routes.
-  The `super` skill in your `.claude/skills` has the detail.
+  via `gravi-axi jira create KB < file`, one bare call per subtask (no loop/`timeout` wrapper). Assign
+  `Dev` to the captain with the MCP `editJiraIssue`; leave `Validate` unassigned unless he names a
+  validator.
+- **The coverage comment** goes through `gravi-axi jira comment <KEY> < file` (posted as the captain),
+  and it is still the only comment you may post.
+- Exit 4 with `jira_not_linked` means the captain's Jira link lapsed — stop and tell me; don't fall
+  back to another tool to write.
+- Don't memorize routes: `gravi-axi jira --help` and `gravi-axi docs jira`; the gravi-jira and `super`
+  skills in your `.claude/skills` have the detail.
 
 **Write almost no comments — and no docstrings to dodge that.** One line max for a comment, **two lines
 of prose max for a docstring** (Python and TS alike, no `Args:`/`Returns:`/`@param` sections), at most
